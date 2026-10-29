@@ -36,12 +36,15 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)" }
 if (-not $FrameworkDependent) {
     $assetsFile = Join-Path $projectRoot 'WardogsOverlay/obj/project.assets.json'
     $restoreAssets = Get-Content -LiteralPath $assetsFile -Raw | ConvertFrom-Json
-    foreach ($library in $restoreAssets.libraries.PSObject.Properties) {
-        if ($library.Name -notmatch '^Microsoft\.(NETCore|WindowsDesktop)\.App\.Runtime\.win-x64/') { continue }
+    $runtimePacks = foreach ($framework in $restoreAssets.project.frameworks.PSObject.Properties.Value) {
+        $framework.downloadDependencies | Where-Object { $_.name -match '^Microsoft\.(NETCore|WindowsDesktop)\.App\.Runtime\.win-x64$' }
+    }
+    foreach ($runtimePack in $runtimePacks) {
+        $runtimeVersion = $runtimePack.version.Trim('[', ']').Split(',')[0].Trim()
         foreach ($folder in $restoreAssets.packageFolders.PSObject.Properties.Name) {
-            $packagePath = Join-Path $folder $library.Value.path
+            $packagePath = Join-Path $folder "$($runtimePack.name.ToLowerInvariant())/$runtimeVersion"
             if (-not (Test-Path -LiteralPath $packagePath)) { continue }
-            $noticeName = ($library.Name -replace '[^a-zA-Z0-9.-]', '-')
+            $noticeName = "$($runtimePack.name)-$runtimeVersion"
             foreach ($notice in Get-ChildItem -LiteralPath $packagePath -File | Where-Object { $_.Name -match '^(LICENSE|THIRD-PARTY-NOTICES)' }) {
                 $noticePath = Join-Path $packageDirectory "licenses/$noticeName-$($notice.Name)"
                 Copy-Item -LiteralPath $notice.FullName -Destination $noticePath
