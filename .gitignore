@@ -1,0 +1,26 @@
+# Build output and local release packages
+**/bin/
+**/obj/
+/Release/
+/Release.zip
+/artifacts/
+/ui-review/
+
+# Local app state and captures
+**/settings.json
+**/economy.json
+**/debug/
+*.log
+*.result.png
+
+# IDE and local tooling
+.vs/
+.idea/
+.vscode/
+.codex/
+.agents/
+*.user
+*.suo
+__pycache__/
+.env
+.env.*
