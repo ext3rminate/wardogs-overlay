@@ -1,3 +1,99 @@
+WARDOGS OVERLAY — attachment buffs and debuffs in the build menu
+==============================================================
+
+ENGLISH
+
+What it does
+  Open Vendor → Equipment → Modules in the game. A panel appears next to the menu
+  with the weapon, attachments, and exact stats: recoil, spread, aim time in seconds,
+  weapon sway, and more. Data uses exact multipliers from game files via metaforge.app.
+
+  • Slot options: select an orange slot to see compatible attachments, prices, and
+    resulting stats. Green means better than the current attachment; red means worse.
+  • Build planner: choose a priority (balance, minimum recoil, or faster aiming) and
+    a budget. The application recommends attachments, leaving the optic and magazine
+    unchanged as matters of personal preference.
+  • Comparison: save a build, then change attachments to see previous → current values
+    (▲ better, ▼ worse).
+  • Shooting range: weapons and attachments are recognized from their icons even when
+    all prices are $0.
+  • Economy: the balance is read from the top-right corner of the vendor screen.
+    Track session earnings, earnings per minute, spending, a balance chart, and history.
+    Session earnings and earnings per minute can also appear at the bottom of the panel.
+
+Database window (open it from the main window or the tray menu)
+  Weapons        — stats, estimated time to kill, and muzzle climb. Select 2–4 weapons
+                   and click Compare.
+  Attachments    — percentage effects, compatible weapons, and slot/weapon filters.
+  Armour         — damage reduction, durability, and protected body zones.
+  Ammo           — calibres, ammunition types, and price per 10 rounds.
+  Progression    — role level unlocks; set your level to highlight upcoming items.
+  Budget loadout — weapon, optic of the chosen magnification, attachments, and armour
+                   within the selected budget.
+  Economy        — session income, balance chart, and session history.
+  Patch          — changes in the latest game update: prices, unlock levels, and stats.
+  Time to kill is an estimate for a burst to the chest with standard ammunition through
+  level 2 body armour (≈).
+  The Maps button opens MetaForge's interactive Bakurani, Ozeti, and Zestafona maps.
+
+Language
+  Use the switch in the top-right corner of the application to choose English or Russian.
+  Russian attachment names follow the style used in the game.
+
+Getting started
+  1. Extract the ZIP from GitHub Releases to a writable folder and run the EXE.
+     Release packages include the .NET Runtime. A FrameworkDependent build requires
+     .NET 10 Desktop Runtime: https://dotnet.microsoft.com/download/dotnet/10.0.
+  2. Install the Russian language in Windows for menu text recognition.
+  3. Set the game interface to Russian and use borderless windowed mode.
+  4. Run WardogsOverlay.exe. Closing the settings window minimizes the application
+     to the tray next to the clock. Right-click the tray icon and choose Exit to quit.
+
+In-game hotkeys (active only while the game is in the foreground)
+  Ctrl+Shift+O — enable or disable menu detection
+  Ctrl+Shift+S — save a build or reset comparison, separately for each weapon
+  Ctrl+Shift+B — cycle build priorities: balance → minimum recoil → faster aiming → off
+  Ctrl+Shift+H — show or hide attachment options for the selected slot
+  Ctrl+Shift+M — move the overlay with the mouse; press again to finish and save its position
+  Ctrl+Shift+D — save a screenshot and recognition trace to debug for troubleshooting
+
+Settings
+  Adjust panel size, opacity, compact mode (main stats only), slot options, capture
+  visibility, build priority and budget, and start minimized to tray.
+  Settings are stored in settings.json next to the executable.
+
+How it works
+  • The application does not open the game process, read its memory, inject code,
+    or modify game files.
+  • It takes screenshots, like Snipping Tool or recording applications, and draws
+    its own window on top.
+  • Hotkeys use Windows RegisterHotKey. No keyboard hook is installed and no input
+    is sent to the game.
+  • Displayed data comes from metaforge.app.
+  Anti-cheat decisions remain with the game developers; no compatibility guarantee
+  is provided.
+
+Resource use
+  Approximately 45 MB of memory; actual usage depends on the build and activity.
+  While the game is minimized or unfocused, only its window is checked every 0.6–2 seconds.
+  In the game without the menu, screenshots and colour checks are used; text recognition
+  starts when the orange menu buttons are detected. After 10 seconds without the menu,
+  detection switches to an economy mode, checking every 3 seconds.
+  While the menu is open, stats are recalculated when slot images change.
+
+Files
+  data\        — MetaForge data and attachment icons; use Update data after a game patch
+  overlay.log  — application log, accessible through the Log button
+  debug\       — Ctrl+Shift+D captures (frame_*) and automatic recognition failure captures
+                 (auto_*, the 10 most recent)
+
+Testing without the game (command line)
+  WardogsOverlay.exe --test screenshot.png
+
+--------------------------------------------------------------------------
+
+РУССКИЙ
+
 WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню сборки
 =====================================================
 
@@ -29,7 +125,6 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
 
   • Язык: русский или английский — переключатель в правом верхнем углу окна программы.
     Названия обвесов по-русски в стиле игры («Коллиматорный прицел Kobra»).
-    English version: switch the language in the top-right corner of the app window.
 
 Как запустить
   1. Распакуй готовый ZIP из GitHub Releases в отдельную папку и запусти EXE.
@@ -53,15 +148,16 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
   скрытие плашки от записи/стрима, приоритет и бюджет подбора, запуск свёрнутым в трей.
   Всё хранится в settings.json рядом с программой.
 
-Почему это не чит и за что тут банить нечего
+Как это работает
   • Программа не открывает процесс игры, не читает её память, ничего не внедряет, не трогает файлы игры.
   • Она делает снимок экрана (как «Ножницы», OBS, Discord) и рисует своё окно поверх.
   • Горячие клавиши — стандартный RegisterHotKey, без перехвата клавиатуры; нажатий в игру не отправляет.
   • Показывает только то, что и так есть на metaforge.app.
-  Гарантий от решений античита никто дать не может, но технически программа делает не больше, чем оверлей Discord.
+  Решения античита остаются на стороне разработчиков игры; гарантий совместимости нет.
 
 Ресурсы
-  ~45 МБ памяти. Пока игра свёрнута или не в фокусе — только проверка окна раз в 0.6–2 с.
+  Около 45 МБ памяти; фактическое потребление зависит от сборки и активности.
+  Пока игра свёрнута или не в фокусе — только проверка окна раз в 0.6–2 с.
   В игре без меню — снимок и проверка цвета, распознавание текста включается, только когда
   на экране есть оранжевые кнопки. Через 10 с без меню — режим экономии (раз в 3 с).
   Пока меню открыто — пересчёт только когда меняется картинка ячеек.

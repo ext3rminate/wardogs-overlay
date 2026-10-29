@@ -54,7 +54,8 @@ if (-not $FrameworkDependent) {
     }
 }
 
-Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/USER_GUIDE.ru.txt') -Destination (Join-Path $packageDirectory 'README.txt')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/USER_GUIDE.txt') -Destination (Join-Path $packageDirectory 'README.txt')
+Copy-Item -LiteralPath (Join-Path $projectRoot 'CHANGELOG.md') -Destination $packageDirectory
 Copy-Item -LiteralPath (Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageDirectory
 if ($FrameworkDependent) {
     $runtimeNote = 'This build requires .NET 10 Desktop Runtime (Windows x64).'
