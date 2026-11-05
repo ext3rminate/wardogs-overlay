@@ -2,7 +2,7 @@
 
 ## English
 
-### Unreleased
+### 1.1.0 — 2026-11-06
 
 - Update check from GitHub Releases at startup and every 6 hours, with an update banner (Update, What's new, Skip this version) and an "Update automatically" toggle on the main window. Downloads are verified with SHA256SUMS.txt; automatic installs wait until the game is in the background.
 - Shooting-range balance ($10 000) no longer counts as income; balance jumps are treated as a new baseline, and earnings per minute skip them.
@@ -30,7 +30,7 @@
 
 ## Русский
 
-### Не выпущено
+### 1.1.0 — 2026-11-06
 
 - Проверка обновлений на GitHub при запуске и раз в 6 часов: баннер «Обновить / Что нового / Пропустить версию» и флаг «Обновлять автоматически» на главной. Скачанный файл сверяется с SHA256SUMS.txt; автоустановка ждёт, пока игра уйдёт в фон.
 - Баланс стрельбища ($10 000) больше не считается заработком; скачок баланса — новая точка отсчёта, в темп заработка не входит.
