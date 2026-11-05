@@ -65,17 +65,55 @@ sealed class Settings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath), Json) ?? new Settings();
+                return (JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath), Json) ?? new Settings()).Sanitized();
         }
-        catch (Exception e) { Log.Info("settings.json не читается, беру значения по умолчанию: " + e.Message); }
-        var s = new Settings();
-        s.Save();
-        return s;
+        catch (Exception e)
+        {
+            // Битый файл не затираем молча: откладываем рядом, чтобы настройки можно было вернуть руками.
+            Log.Info("settings.json не читается, беру значения по умолчанию: " + e.Message);
+            SafeFile.Quarantine(FilePath);
+        }
+        return new Settings();
+    }
+
+    /// <summary>Значения из файла могли поправить руками: 0 мс в интервале — это 100% ядра, null — падение.</summary>
+    Settings Sanitized()
+    {
+        WindowClass ??= "";
+        if (WindowTitleContains == null || WindowTitleContains.Length == 0) WindowTitleContains = new Settings().WindowTitleContains;
+        OverlayScale = double.IsFinite(OverlayScale) ? Math.Clamp(OverlayScale, 0.5, 3) : 1;
+        Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.94;
+        SlotOptionsMax = Math.Clamp(SlotOptionsMax, 1, 20);
+        BestBudget = Math.Clamp(BestBudget, 0, 9_999_999);
+        ScanIntervalMs = Math.Clamp(ScanIntervalMs, 200, 10_000);
+        IdleAfterMs = Math.Clamp(IdleAfterMs, 1000, 600_000);
+        IdleScanIntervalMs = IdleScanIntervalMs <= 0 ? 0 : Math.Clamp(IdleScanIntervalMs, 500, 60_000);
+        TrackIntervalMs = Math.Clamp(TrackIntervalMs, 100, 5000);
+        FullRecheckMs = Math.Clamp(FullRecheckMs, 1000, 120_000);
+        return this;
     }
 
     public void Save()
     {
-        try { File.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json)); }
+        try { SafeFile.WriteAllText(FilePath, JsonSerializer.Serialize(this, Json)); }
         catch (Exception e) { Log.Info("Не удалось сохранить settings.json: " + e.Message); }
+    }
+}
+
+/// <summary>Запись файлов так, чтобы сбой посреди записи не оставил полфайла.</summary>
+static class SafeFile
+{
+    public static void WriteAllText(string path, string text)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, text);
+        File.Move(tmp, path, true);
+    }
+
+    /// <summary>Нечитаемый файл — в сторону (.corrupt), чтобы следующее сохранение его не затёрло.</summary>
+    public static void Quarantine(string path)
+    {
+        try { if (File.Exists(path)) File.Move(path, path + ".corrupt", true); }
+        catch (Exception e) { Log.Info($"Не удалось отложить {Path.GetFileName(path)}: " + e.Message); }
     }
 }

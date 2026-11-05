@@ -28,8 +28,11 @@ sealed class Scanner : IDisposable
     Recognition? current;
     long lastMenu = Environment.TickCount64;
     bool asleep, debugRequested, lastForeground, shown;
+    bool menuVisible;
+    int visit;
     string lastKey = "";
     int retries;
+    string? pendingKey;
     long lastAutoDebug = -60_000;
 
     public bool Enabled { get; private set; } = true;
@@ -170,12 +173,31 @@ sealed class Scanner : IDisposable
         var rec = recognizer.Run(frame);
         if (debugRequested) SaveDebug(frame, rec);
         else if (settings.AutoDebugFrames && rec.Menu && now - lastAutoDebug > 60_000
-                 && (rec.Weapon == null || (rec.Cells.Any(c => c.Att == null) && retries >= 3)))
+                 && !rec.Occluded && (rec.Weapon == null || (rec.Cells.Any(c => c.Att == null) && retries >= 3)))
         {
             // Меню видно, а что-то не узнали — сохраняем снимок сами (не чаще раза в минуту, последние 10).
             lastAutoDebug = now;
             SaveDebug(frame, rec, auto: true);
         }
+
+        bool samePlaque = rec.Menu && rec.Weapon != null && current?.Weapon?.Slug == rec.Weapon.Slug;
+        // Навели мышь на обвес — подсказка игры закрыла ячейки. Пока она висит, оставляем то, что
+        // уже показано, и перепроверяем (без подсказки сигнатура снова поменяется).
+        if (samePlaque && rec.Occluded)
+        {
+            lastMenu = now;
+            track = null;
+            return settings.TrackIntervalMs;
+        }
+        // Состав поменялся — показываем, только если следующий кадр видит то же самое: один кадр
+        // на анимации или с плохо прочитанным ценником не должен заставлять плашку мигать.
+        if (samePlaque && rec.Key != current!.Key && rec.Key != pendingKey)
+        {
+            pendingKey = rec.Key;
+            track = null;
+            return 150;
+        }
+        pendingKey = null;
 
         // Кадр попал на анимацию смены обвеса — не мигаем «не узнал», а быстро перепроверяем.
         bool shaky = rec.Menu && rec.Weapon != null && rec.Cells.Any(c => c.Att == null);
@@ -187,7 +209,10 @@ sealed class Scanner : IDisposable
         }
         retries = 0;
 
-        if (rec.Menu && rec.Balance is int balance) Economy.Add(balance);
+        if (rec.Menu && !menuVisible) visit++;
+        menuVisible = rec.Menu;
+        // На стрельбище все цены $0 и баланс ненастоящий ($10 000) — в экономику не пишем.
+        if (rec.Menu && rec.Balance is int balance && rec.Cells.Any(c => c.Price > 0)) Economy.Add(balance, visit);
 
         if (rec.Menu && rec.Weapon != null)
         {
@@ -303,6 +328,9 @@ sealed class Scanner : IDisposable
     {
         if (fg == lastForeground) return;
         lastForeground = fg;
+        menuVisible = false;
+        // Вернулись в игру — даём обычный темп поиска, а не сразу режим экономии.
+        if (fg) { lastMenu = Environment.TickCount64; asleep = false; }
         overlay.BeginInvoke(() => overlay.SetGameForeground(fg));
     }
 

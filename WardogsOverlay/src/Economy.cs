@@ -11,14 +11,31 @@ sealed class EconomySession
 
     public int Earned => Deltas().Where(d => d > 0).Sum();
     public int Spent => -Deltas().Where(d => d < 0).Sum();
-    public int Net => Points.Count < 2 ? 0 : Points[^1].Balance - Points[0].Balance;
+    public int Net => Earned - Spent;
     public TimeSpan Duration => Points.Count < 2 ? TimeSpan.Zero : Points[^1].Time - Points[0].Time;
     /// <summary>Заработок в минуту (без учёта покупок) — сколько приносит игра.</summary>
-    public double EarnedPerMinute => Duration.TotalMinutes < 1 ? 0 : Earned / Duration.TotalMinutes;
+    public double EarnedPerMinute
+    {
+        get
+        {
+            // Время до скачка (стрельбище, другой аккаунт) в темп заработка не входит.
+            double minutes = 0;
+            for (int i = 1; i < Points.Count; i++)
+                if (!Economy.IsJump(Points[i - 1].Balance, Points[i].Balance))
+                    minutes += (Points[i].Time - Points[i - 1].Time).TotalMinutes;
+            return minutes < 1 ? 0 : Earned / minutes;
+        }
+    }
 
+    /// <summary>
+    /// Изменения баланса между показаниями. Скачок в разы (стрельбище с $10 000, ошибка OCR,
+    /// другой аккаунт) — не заработок и не покупка, а новая точка отсчёта.
+    /// </summary>
     IEnumerable<int> Deltas()
     {
-        for (int i = 1; i < Points.Count; i++) yield return Points[i].Balance - Points[i - 1].Balance;
+        for (int i = 1; i < Points.Count; i++)
+            if (!Economy.IsJump(Points[i - 1].Balance, Points[i].Balance))
+                yield return Points[i].Balance - Points[i - 1].Balance;
     }
 }
 
@@ -48,17 +65,25 @@ sealed class Economy
         get { lock (gate) return history.Where(s => s.Points.Count >= 2).Reverse().ToList(); }
     }
 
-    /// <summary>Новое показание баланса. Одинаковые подряд и явные ошибки OCR отбрасываются.</summary>
-    public void Add(int balance)
+    /// <summary>Скачок баланса в разы — такое не заработать за один заход.</summary>
+    public static bool IsJump(int prev, int cur) =>
+        prev > 0 && (cur > prev * 8L + 50_000 || cur * 8L + 1000 < prev);
+
+    /// <summary>
+    /// Новое показание баланса. Одинаковые подряд и явные ошибки OCR отбрасываются.
+    /// visit — номер захода в меню: скачок принимается, только если повторился в другом заходе
+    /// (в одном заходе OCR читает одну и ту же картинку и повторяет ту же ошибку).
+    /// </summary>
+    public void Add(int balance, int visit)
     {
         lock (gate)
         {
             var pts = Current.Points;
-            if (pts.Count > 0 && pts[^1].Balance == balance) return;
-            // OCR мог потерять или добавить цифру: скачок в 10 раз без подтверждения — не верим.
-            if (pts.Count > 0 && pts[^1].Balance > 0 && (balance > pts[^1].Balance * 8 + 50_000 || balance * 8 + 1000 < pts[^1].Balance))
+            if (pts.Count > 0 && pts[^1].Balance == balance) { pending = null; return; }
+            if (pts.Count > 0 && IsJump(pts[^1].Balance, balance))
             {
-                if (pending != balance) { pending = balance; return; }
+                if (pending != balance) { pending = balance; pendingVisit = visit; return; }
+                if (pendingVisit == visit) return;
             }
             pending = null;
             pts.Add(new MoneyPoint(DateTime.Now, balance));
@@ -69,6 +94,7 @@ sealed class Economy
     }
 
     int? pending;
+    int pendingVisit;
 
     public void NewSession()
     {
@@ -91,7 +117,7 @@ sealed class Economy
         try
         {
             var keep = history.Where(s => s.Points.Count >= 2).TakeLast(200).ToList();
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(keep, Json));
+            SafeFile.WriteAllText(FilePath, JsonSerializer.Serialize(keep, Json));
         }
         catch (Exception e) { Log.Info("Не удалось сохранить экономику: " + e.Message); }
     }
@@ -103,7 +129,12 @@ sealed class Economy
             if (File.Exists(FilePath))
                 return JsonSerializer.Deserialize<List<EconomySession>>(File.ReadAllText(FilePath), Json) ?? [];
         }
-        catch { }
+        catch (Exception e)
+        {
+            // Иначе следующее сохранение перезапишет всю историю одной текущей сессией.
+            Log.Info("economy.json не читается, история отложена в economy.json.corrupt: " + e.Message);
+            SafeFile.Quarantine(FilePath);
+        }
         return [];
     }
 

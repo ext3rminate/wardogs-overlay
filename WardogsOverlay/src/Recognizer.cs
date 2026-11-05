@@ -7,6 +7,7 @@ sealed class CellHit
     public Attachment? Att;
     public double Score;
     public string How = "";
+    public bool Occluded;         // ячейку закрывает всплывающая подсказка игры
 }
 
 sealed class Recognition
@@ -23,6 +24,8 @@ sealed class Recognition
     public int AnchorX, AnchorY;  // где ставить плашку, координаты исходного кадра
     public double UiHeight;       // высота кадра, к которой привязан размер плашки
     public List<string> Trace = [];
+    /// <summary>Часть ячеек закрыта подсказкой (навели мышь на обвес) — кадр не годится, чтобы что-то менять.</summary>
+    public bool Occluded => Cells.Any(c => c.Occluded);
 
     public string Key => Weapon == null ? "" :
         Weapon.Slug + ":" + string.Join(",", Cells.Select(c => c.Att?.Slug ?? "?" + c.Price)) + "@" + SelectedSlot;
@@ -102,15 +105,26 @@ sealed class Recognizer(OcrService ocr)
         var strip = RectI.FromLTRB(header.Box.X - 2 * h, header.Box.Bottom + h / 5,
                                    header.Box.X + 62 * h, header.Box.Bottom + 9 * h).Intersect(f.Bounds);
         var normCells = new List<(RectI Content, CellHit Hit)>();
-        foreach (var tag in GreenTags(f, strip, h))
+        var tags = GreenTags(f, strip, h);
+        int fullTag = tags.Count > 0 ? tags.Max(t => t.H) : 0;
+        foreach (var tag in tags)
         {
             var cell = CellFromTag(f, tag);
             if (cell == null) continue;
             var (content, barTop) = cell.Value;
             var hit = new CellHit { Cell = ToRaw(RectI.FromLTRB(content.X, content.Y, content.Right, barTop)) };
             normCells.Add((content, hit));
-            hit.Price = ReadPrice(f, words, tag, p => p == 0 || data.Attachments.Values.Any(a => a.Prices.Contains(p) &&
-                                                                                        (rec.Weapon == null || a.FitsWeapon(rec.Weapon))));
+            if (tag.H < 0.8 * fullTag)
+            {
+                // Ценник ниже, чем у соседей: его срезала всплывающая подсказка, и картинка под ней
+                // тоже закрыта. По такой ячейке ничего не решаем.
+                hit.Occluded = true;
+                hit.How = "закрыта подсказкой";
+                rec.Cells.Add(hit);
+                rec.Trace.Add($"ячейка {content}: закрыта (ценник {tag.H} при обычном {fullTag})");
+                continue;
+            }
+            hit.Price = ReadPrice(f, words, tag, p => p == 0 || data.Attachments.Values.Any(a => a.Prices.Contains(p) && Sellable(a, rec.Weapon)));
             Identify(f, content, tag, hit, rec);
             rec.Cells.Add(hit);
         }
@@ -140,9 +154,14 @@ sealed class Recognizer(OcrService ocr)
                 string text = "";
                 foreach (var scale in new[] { 3, 4 })
                 {
-                    text = string.Join(" ", ocr.Russian(crop.Resize(crop.W * scale, crop.H * scale)).Select(l => l.Text));
-                    var amounts = System.Text.RegularExpressions.Regex.Matches(text, @"[$S§]\s*([\doOоО](?:[\s  ]?[\doOоО])*)")
-                        .Select(m => new string(m.Groups[1].Value.Select(c => "oOоО".Contains(c) ? '0' : c).Where(char.IsDigit).ToArray()))
+                    // Строки OCR не обязательно идут слева направо: сортируем по X, баланс — самая правая сумма.
+                    var ocrLines = ocr.Russian(crop.Resize(crop.W * scale, crop.H * scale))
+                        .Where(l => l.Words.Count > 0).OrderBy(l => l.Words.Min(w => w.Box.X)).ToList();
+                    text = string.Join(" ", ocrLines.Select(l => l.Text));
+                    var amounts = ocrLines.SelectMany(l => System.Text.RegularExpressions.Regex.Matches(
+                            TextUtil.DigitLike(l.Text.Replace('S', '$').Replace('§', '$')),
+                            @"\$\s*(\d{1,3}(?:[\s\u00A0\u202F]\d{3})+|\d{1,9})(?!\w)"))
+                        .Select(m => new string(m.Groups[1].Value.Where(char.IsAsciiDigit).ToArray()))
                         .Where(d => d.Length is > 0 and <= 9).Select(int.Parse).ToList();
                     if (amounts.Count == 0) continue;
                     rec.Balance = amounts[^1];
@@ -223,33 +242,49 @@ sealed class Recognizer(OcrService ocr)
     /// Деньги игрока — справа сверху на экране продавца: «$0 | $10 000». Берём самую правую сумму.
     /// OCR разбивает «$10 000» на слова «$10» и «000», поэтому склеиваем соседние группы из трёх цифр.
     /// </summary>
-    static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec)
+    internal static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec)
     {
         var zone = RectI.FromLTRB((int)(f.W * 0.68), 0, f.W, (int)(f.H * 0.09));
-        var amounts = new List<(int X, int Value, string Text)>();
+        var amounts = new List<(int X, int? Value, string Text)>();
         foreach (var line in lines)
         {
             var ws = line.Words.Where(w => zone.Contains(w.Box.CenterX, w.Box.CenterY)).OrderBy(w => w.Box.X).ToList();
             for (int i = 0; i < ws.Count; i++)
             {
-                var t = ws[i].Text.Replace('S', '$').Replace('§', '$');
+                var t = TextUtil.DigitLike(ws[i].Text.Replace('S', '$').Replace('§', '$'));
                 if (!t.StartsWith('$')) continue;
-                var digits = new string(t.Where(char.IsDigit).ToArray());
-                if (digits.Length == 0) continue;
-                var text = t;
-                int right = ws[i].Box.Right;
-                for (int j = i + 1; j < ws.Count; j++)
+                int x = ws[i].Box.X, right = ws[i].Box.Right, gap = (int)(ws[i].Box.H * 1.2);
+                // «$» отдельным словом — цифры в следующем.
+                if (t == "$" && i + 1 < ws.Count && ws[i + 1].Box.X - right <= gap)
                 {
-                    var next = ws[j].Text;
-                    bool group = next.Length == 3 && next.All(char.IsDigit);
-                    if (!group || ws[j].Box.X - right > ws[i].Box.H * 1.2) break;
+                    i++;
+                    t += TextUtil.DigitLike(ws[i].Text);
+                    right = ws[i].Box.Right;
+                }
+                var head = t[1..];
+                bool ok = head.Length > 0 && head.All(char.IsAsciiDigit);
+                var digits = ok ? head : "";
+                var text = t;
+                for (int j = i + 1; ok && j < ws.Count; j++)
+                {
+                    if (ws[j].Box.X - right > gap) break;
+                    var next = TextUtil.DigitLike(ws[j].Text);
+                    if (next.StartsWith('$') || !next.Any(char.IsAsciiDigit)) break;
+                    // Рядом кусок числа, но не «три цифры» — OCR ошибся: лучше не знать баланс, чем записать в 1000 раз меньше.
+                    if (next.Length != 3 || !next.All(char.IsAsciiDigit) || head.Length > 3) { ok = false; text += " " + next; break; }
                     digits += next; text += " " + next; right = ws[j].Box.Right; i = j;
                 }
-                if (digits.Length <= 9 && int.TryParse(digits, out var v)) amounts.Add((ws[i].Box.X, v, text));
+                amounts.Add((x, ok && digits.Length <= 9 && int.TryParse(digits, out var v) ? v : null, text));
             }
         }
         if (amounts.Count == 0) return null;
         var best = amounts.MaxBy(a => a.X);
+        // Самая правая сумма (баланс) не разобралась — не подставляем вместо неё левую ($0 корзины).
+        if (best.Value == null)
+        {
+            rec.Trace.Add($"деньги: {string.Join(" | ", amounts.Select(a => a.Text))} → не разобрал");
+            return null;
+        }
         rec.Trace.Add($"деньги: {string.Join(" | ", amounts.Select(a => a.Text))} → {best.Value}");
         return best.Value;
     }
@@ -343,8 +378,16 @@ sealed class Recognizer(OcrService ocr)
             rec.Trace.Add("  " + string.Join(", ", pool
                 .Select(w => (w.Name, s: icons.Match(f, slot, Allowed, [w], x => x.Icon, IconMatcher.WeaponFits).Score))
                 .OrderByDescending(t => t.s).Take(6).Select(t => $"{t.Name} {t.s:0.00}")));
-        return best != null && score >= 0.5 && score - second >= 0.03 ? best : null;
+        if (best == null || score < 0.5 || score - second < 0.03) { lastIconWeapon = null; return null; }
+        // Похожие силуэты (семейство M4) дают отрыв в сотые доли: такой ответ берём, только если
+        // он повторился на двух кадрах подряд. Ошибка с пушкой испортила бы и все обвесы.
+        bool sure = score - second >= 0.08 || lastIconWeapon == best;
+        lastIconWeapon = best;
+        if (!sure) rec.Trace.Add("  отрыв мал — жду подтверждения на следующем кадре");
+        return sure ? best : null;
     }
+
+    Weapon? lastIconWeapon;
 
     /// <summary>Яркость букв: 95-й перцентиль яркости в рамке слова.</summary>
     static int TextBrightness(Frame f, RectI r)
@@ -482,23 +525,29 @@ sealed class Recognizer(OcrService ocr)
         var inside = words.Where(w => tag.Inflate(2, 2).Contains(w.Box.CenterX, w.Box.CenterY)).Select(w => w.Text);
         var first = TextUtil.ParsePrice(string.Concat(inside));
         if (first is int p && plausible(p)) return p;
-        return ReadPriceCrop(f, tag) ?? first;
+        var again = ReadPriceCrop(f, tag);
+        return again is int q && plausible(q) ? q : first ?? again;
     }
 
     int? ReadPriceCrop(Frame f, RectI tag)
     {
         var crop = f.Crop(tag.Inflate(2, 2));
         crop = crop.Resize(crop.W * 3, crop.H * 3);
-        var text = string.Concat(ocr.English(crop).Select(l => l.Text));
-        return TextUtil.ParsePrice(text.Replace('O', '0').Replace('o', '0').Replace('S', '5').Replace('l', '1').Replace('I', '1'));
+        var text = string.Concat(ocr.English(crop).Select(l => l.Text)).TrimStart();
+        // Знак доллара OCR читает как «S» — его отрезаем до замены S→5, иначе «$350» станет 5350.
+        if (text.Length > 0 && text[0] is '$' or 'S' or '§') text = text[1..];
+        return TextUtil.ParsePrice(TextUtil.DigitLike(text).Replace('S', '5'));
     }
+
+    /// <summary>Продавец показывает только то, что продаётся и явно подходит к пушке.</summary>
+    static bool Sellable(Attachment a, Weapon? w) =>
+        a.InVendor && (w == null || (a.Fits?.Contains(w.Slug) ?? false));
 
     void Identify(Frame f, RectI content, RectI tag, CellHit hit, Recognition rec)
     {
         // Только то, что продаётся и подходит к пушке: заводские детали без цены и без списка
         // совместимости продавец не показывает.
-        var pool = data.Attachments.Values
-            .Where(a => a.InVendor && (rec.Weapon == null || (a.Fits?.Contains(rec.Weapon.Slug) ?? false))).ToList();
+        var pool = data.Attachments.Values.Where(a => Sellable(a, rec.Weapon)).ToList();
         if (pool.Count == 0) pool = data.Attachments.Values.Where(a => a.InVendor).ToList();
         // $0 — стрельбище, там всё бесплатно: цена ничего не говорит, узнаём по картинке.
         var byPrice = hit.Price is int p and > 0 ? pool.Where(a => a.Prices.Contains(p)).ToList() : [];
@@ -513,16 +562,21 @@ sealed class Recognizer(OcrService ocr)
         var candidates = byPrice.Count > 0 ? byPrice : pool;
         if (byPrice.Count == 1)
         {
-            hit.Att = byPrice[0];
-            hit.How = "цена";
             var (_, sc, _) = icons.Match(f, content, Allowed, byPrice);
             hit.Score = sc;
+            // Цена совпала, а картинка совсем другая — скорее всего ячейку закрыло или цена прочиталась не та.
+            if (sc >= 0.3 || double.IsNegativeInfinity(sc))
+            {
+                hit.Att = byPrice[0];
+                hit.How = "цена";
+            }
+            else hit.How = $"цена есть, картинка не та ({sc:0.00})";
         }
         else
         {
             var (best, score, second) = icons.Match(f, content, Allowed, candidates);
             hit.Score = score;
-            bool sure = byPrice.Count > 0 ? best != null : best != null && score >= 0.55 && score - second >= 0.03;
+            bool sure = byPrice.Count > 0 ? best != null && score >= 0.3 : best != null && score >= 0.55 && score - second >= 0.03;
             if (sure)
             {
                 hit.Att = best;

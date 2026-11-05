@@ -16,6 +16,10 @@ sealed class Weapon
     public Dictionary<string, double> Attr { get; init; } = [];
     public string[] Slots { get; init; } = [];
     public int? Damage { get; set; }
+    /// <summary>Дробин в выстреле (у дроби 8, у остальных 1).</summary>
+    public int Pellets { get; set; } = 1;
+    /// <summary>Поправка патрона против бронежилета, % (у дроби −40, у пули 12 калибра −30).</summary>
+    public double ArmourAmmoPct { get; set; }
     public int? Rpm { get; set; }
     public int? Range { get; set; }
     public int? Velocity { get; set; }
@@ -113,6 +117,12 @@ sealed class GameData
     public static string Dir => Path.Combine(AppContext.BaseDirectory, "data");
     static string IconDir => Path.Combine(Dir, "icons");
     static string JsonPath(string name) => Path.Combine(Dir, name.Replace('/', '-') + ".json");
+    /// <summary>Свежескачанный файл, ещё не проверенный (лежит рядом с рабочим, пока база из него не откроется).</summary>
+    static string StagedPath(string name) => JsonPath(name) + ".new";
+    static string ReadPath(string name, bool staged) =>
+        staged && File.Exists(StagedPath(name)) ? StagedPath(name) : JsonPath(name);
+    /// <summary>Иконки, которых нет на сервере: не перекачиваем их при каждом запуске.</summary>
+    static string MissingIconsPath => Path.Combine(IconDir, "_missing.txt");
 
     public List<Weapon> Weapons { get; } = [];
     public Dictionary<string, Attachment> Attachments { get; } = [];
@@ -126,15 +136,21 @@ sealed class GameData
     public static bool IsDownloaded => Files.All(f => File.Exists(JsonPath(f)));
 
     /// <summary>База скачана старой версией программы — не хватает иконок пушек или журнала патчей.</summary>
-    public bool NeedsUpdate =>
-        Weapons.Any(w => !string.IsNullOrEmpty(w.Icon) && IconFile(w.Icon) == null) ||
-        OptionalFiles.Any(f => !File.Exists(JsonPath(f)));
+    public bool NeedsUpdate
+    {
+        get
+        {
+            var missing = File.Exists(MissingIconsPath) ? File.ReadAllLines(MissingIconsPath).ToHashSet() : [];
+            return Weapons.Any(w => !string.IsNullOrEmpty(w.Icon) && IconFile(w.Icon) == null && !missing.Contains(w.Icon)) ||
+                   OptionalFiles.Any(f => !File.Exists(JsonPath(f)));
+        }
+    }
 
     public string? IconFile(string icon)
     {
         if (string.IsNullOrEmpty(icon)) return null;
         var p = Path.Combine(IconDir, icon + ".webp");
-        return File.Exists(p) ? p : null;
+        return File.Exists(p) && new FileInfo(p).Length > 0 ? p : null;
     }
 
     public static async Task DownloadAsync(Action<string> report)
@@ -144,48 +160,76 @@ sealed class GameData
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("WardogsOverlay/1.0 (+personal, non-commercial)");
 
-        foreach (var name in Files.Concat(OptionalFiles))
+        // Сначала всё скачиваем рядом (.new) и пробуем открыть базу из новых файлов. Рабочие файлы
+        // заменяем, только если база открылась: ответ сервера не того вида не должен сломать то, что работало.
+        var all = Files.Concat(OptionalFiles).ToList();
+        foreach (var name in all) File.Delete(StagedPath(name));
+        try
         {
-            report(L.T($"Скачиваю {name}…", $"Downloading {name}…"));
-            try
+            foreach (var name in all)
             {
-                var text = await http.GetStringAsync(Api + name);
-                using (JsonDocument.Parse(text)) { } // проверка, что пришёл JSON, а не страница ошибки
-                var path = JsonPath(name);
-                await File.WriteAllTextAsync(path + ".tmp", text);
-                File.Move(path + ".tmp", path, true);
+                report(L.T($"Скачиваю {name}…", $"Downloading {name}…"));
+                try
+                {
+                    var text = await http.GetStringAsync(Api + name);
+                    using (JsonDocument.Parse(text)) { } // проверка, что пришёл JSON, а не страница ошибки
+                    await File.WriteAllTextAsync(StagedPath(name), text);
+                }
+                catch (Exception e) when (OptionalFiles.Contains(name)) { Log.Info($"Не скачался {name}: {e.Message}"); }
             }
-            catch when (OptionalFiles.Contains(name)) { /* без журнала патчей можно жить */ }
+            try { Load(staged: true); }
+            catch (Exception e)
+            {
+                throw new InvalidDataException(L.T("metaforge.app прислал данные в неожиданном виде, оставляю прежнюю базу.",
+                                                   "metaforge.app returned data in an unexpected format; keeping the previous data."), e);
+            }
+            foreach (var name in all.Where(n => File.Exists(StagedPath(n))))
+                File.Move(StagedPath(name), JsonPath(name), true);
+        }
+        finally
+        {
+            foreach (var name in all) File.Delete(StagedPath(name));
         }
 
         var data = Load();
         var icons = data.Attachments.Values.Select(a => a.Icon).Concat(data.Weapons.Select(w => w.Icon))
-            .Where(i => !string.IsNullOrEmpty(i) && !File.Exists(Path.Combine(IconDir, i + ".webp")))
+            .Where(i => !string.IsNullOrEmpty(i) && data.IconFile(i) == null)
             .Distinct().ToList();
         report(L.T($"Скачиваю иконки: {icons.Count} шт.…", $"Downloading icons: {icons.Count}…"));
         using var gate = new SemaphoreSlim(6);
         int failed = 0;
+        var notFound = new System.Collections.Concurrent.ConcurrentBag<string>();
         await Task.WhenAll(icons.Select(async icon =>
         {
             await gate.WaitAsync();
             try
             {
                 var bytes = await http.GetByteArrayAsync(IconUrl + icon + ".webp");
-                await File.WriteAllBytesAsync(Path.Combine(IconDir, icon + ".webp"), bytes);
+                var path = Path.Combine(IconDir, icon + ".webp");
+                await File.WriteAllBytesAsync(path + ".tmp", bytes);
+                File.Move(path + ".tmp", path, true);
+            }
+            catch (HttpRequestException e) when (e.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                notFound.Add(icon);
+                Interlocked.Increment(ref failed);
             }
             catch { Interlocked.Increment(ref failed); }
             finally { gate.Release(); }
         }));
+        File.WriteAllLines(MissingIconsPath, notFound.Order());
         report(failed == 0 ? L.T("База обновлена.", "Data updated.")
                            : L.T($"База обновлена, не скачалось иконок: {failed}.", $"Data updated, icons failed: {failed}."));
     }
 
-    public static GameData Load()
+    public static GameData Load() => Load(staged: false);
+
+    static GameData Load(bool staged)
     {
         var gd = new GameData();
-        using var db = JsonDocument.Parse(File.ReadAllText(JsonPath("database")));
-        using var stats = JsonDocument.Parse(File.ReadAllText(JsonPath("attachment-stats")));
-        using var bal = JsonDocument.Parse(File.ReadAllText(JsonPath("ballistics/v2")));
+        using var db = JsonDocument.Parse(File.ReadAllText(ReadPath("database", staged)));
+        using var stats = JsonDocument.Parse(File.ReadAllText(ReadPath("attachment-stats", staged)));
+        using var bal = JsonDocument.Parse(File.ReadAllText(ReadPath("ballistics/v2", staged)));
         gd.Version = Str(db.RootElement, "generatedAt") ?? "";
 
         // Цены одного патрона по калибру (обычные, экспансивные, бронебойные…) — ценник магазина
@@ -296,24 +340,34 @@ sealed class GameData
         }
 
         ReadBallistics(bal.RootElement, gd, weaponsBySlug);
-        ReadChangelog(gd);
+        ReadChangelog(gd, staged);
+        if (gd.Weapons.Count == 0 || gd.Attachments.Count == 0)
+            throw new InvalidDataException(L.T("в базе нет пушек или обвесов", "data has no weapons or attachments"));
         return gd;
     }
 
     static void ReadBallistics(JsonElement root, GameData gd, Dictionary<string, Weapon> weaponsBySlug)
     {
-        var calDamage = new Dictionary<string, int>();
-        if (root.TryGetProperty("calibres", out var cals))
+        var calDamage = new Dictionary<string, (int Damage, int Pellets, double ArmourPct)>();
+        if (root.TryGetProperty("calibres", out var cals) && cals.ValueKind == JsonValueKind.Object)
             foreach (var c in cals.EnumerateObject())
-                if (Num(c.Value, "baseDamage") is double d) calDamage[c.Name] = (int)Math.Round(d);
+                if (Num(c.Value, "baseDamage") is double d)
+                {
+                    double armourPct = 0;
+                    if (c.Value.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Array)
+                        foreach (var r in rules.EnumerateArray())
+                            if (Str(r, "kind") == "AmmoModifier" && Arr(r, "tgt").Contains("Armor") && Num(r, "pct") is double pct)
+                                armourPct = pct;
+                    calDamage[c.Name] = ((int)Math.Round(d), Math.Max(1, (int)(Num(c.Value, "pellets") ?? 1)), armourPct);
+                }
 
         var hitboxes = new Dictionary<string, Dictionary<string, double>>();
-        if (root.TryGetProperty("hitboxes", out var hb))
+        if (root.TryGetProperty("hitboxes", out var hb) && hb.ValueKind == JsonValueKind.Object)
             foreach (var cls in hb.EnumerateObject())
                 hitboxes[cls.Name] = cls.Value.EnumerateObject().Where(z => z.Value.ValueKind == JsonValueKind.Number)
                                               .ToDictionary(z => z.Name, z => z.Value.GetDouble());
 
-        if (root.TryGetProperty("weapons", out var bw))
+        if (root.TryGetProperty("weapons", out var bw) && bw.ValueKind == JsonValueKind.Array)
             foreach (var b in bw.EnumerateArray())
             {
                 if (Str(b, "slug") is not string s || !weaponsBySlug.TryGetValue(s, out var w)) continue;
@@ -323,7 +377,7 @@ sealed class GameData
                 w.MagSize = Num(b, "magSize") is double ms ? (int)ms : null;
                 w.Moa = Num(b, "accuracyMoa");
                 w.FireModes = Arr(b, "fireModes");
-                if (Str(b, "calibre") is string cal && calDamage.TryGetValue(cal, out var dmg)) w.Damage = dmg;
+                if (Str(b, "calibre") is string cal && calDamage.TryGetValue(cal, out var dmg)) (w.Damage, w.Pellets, w.ArmourAmmoPct) = dmg;
                 var cls = Str(b, "weaponClass") ?? w.Sub;
                 if (hitboxes.TryGetValue(cls, out var hit) || hitboxes.TryGetValue(w.Sub, out hit)) w.Hit = hit;
                 if (b.TryGetProperty("recoilPattern", out var rp) && rp.ValueKind == JsonValueKind.Array)
@@ -346,9 +400,9 @@ sealed class GameData
             }
     }
 
-    static void ReadChangelog(GameData gd)
+    static void ReadChangelog(GameData gd, bool staged)
     {
-        var path = JsonPath("changelog");
+        var path = ReadPath("changelog", staged);
         if (!File.Exists(path)) return;
         try
         {

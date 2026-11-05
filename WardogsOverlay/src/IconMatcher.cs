@@ -40,7 +40,8 @@ sealed class IconMatcher(GameData data)
             if (s > bestScore) { second = bestScore; bestScore = s; best = a; }
             else if (s > second) second = s;
         }
-        return (best, bestScore, second);
+        // Единственный кандидат: «следующего» нет, отрыв считаем от нуля, а не от минус бесконечности.
+        return (best, bestScore, double.IsNegativeInfinity(second) ? 0 : second);
     }
 
     /// <summary>

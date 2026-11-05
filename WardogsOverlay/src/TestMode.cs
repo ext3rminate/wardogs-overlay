@@ -21,6 +21,7 @@ static class TestMode
             return 0;
         }
         if (files.Length >= 1 && files[0] == "--test-window") return TestWindow();
+        if (files.Length >= 1 && files[0] == "--self-check") return SelfCheck();
         if (files.Length >= 2 && files[0] == "--test-db") return TestDatabase(files[1], files.Contains("--en"));
         if (files.Length >= 2 && files[0] == "--test-main")
         {
@@ -162,6 +163,68 @@ static class TestMode
     }
 
     /// <summary>Открывает окно «База», рисует каждую вкладку в PNG и печатает результаты сборки под бюджет.</summary>
+    /// <summary>Проверки логики без игры и без OCR: разбор баланса, экономика, статы, подбор.</summary>
+    static int SelfCheck()
+    {
+        int fails = 0;
+        void Check(string name, bool ok, string got = "")
+        {
+            if (!ok) fails++;
+            Console.WriteLine($"{(ok ? "ok  " : "FAIL")} {name}{(got.Length > 0 ? "  → " + got : "")}");
+        }
+
+        // Баланс: слова OCR в правом верхнем углу кадра 1920x1080.
+        var frame = new Frame(1920, 1080);
+        int? Balance(params string[] words)
+        {
+            int x = 1400;
+            var ws = new List<OcrWord>();
+            foreach (var w in words)
+            {
+                if (w == "|") { x += 120; continue; }
+                ws.Add(new OcrWord(w, new RectI(x, 30, 12 * w.Length, 20)));
+                x += 12 * w.Length + 8;
+            }
+            return Recognizer.ReadBalance([new OcrLineText(string.Join(" ", words), ws)], frame, new Recognition());
+        }
+        Check("баланс $150 | $324 935", Balance("$150", "|", "$324", "935") == 324935, Balance("$150", "|", "$324", "935")?.ToString() ?? "null");
+        Check("баланс слитно $336126", Balance("$0", "|", "$336126") == 336126);
+        Check("«$» отдельным словом", Balance("$0", "|", "$", "324", "935") == 324935, Balance("$0", "|", "$", "324", "935")?.ToString() ?? "null");
+        Check("З вместо 3 в группе", Balance("$0", "|", "$324", "9З5") == 324935, Balance("$0", "|", "$324", "9З5")?.ToString() ?? "null");
+        Check("испорченная группа → не знаю, а не $324", Balance("$0", "|", "$324", "9?5") == null, Balance("$0", "|", "$324", "9?5")?.ToString() ?? "null");
+        Check("правая сумма не читается → не $0 корзины", Balance("$0", "|", "$abc") == null, Balance("$0", "|", "$abc")?.ToString() ?? "null");
+
+        // Экономика: стрельбище $10 000 → продавец $324 935 → $376 326 (реальная сессия 29.10).
+        var s = new EconomySession();
+        var t0 = DateTime.Now;
+        s.Points.AddRange([new(t0, 10000), new(t0.AddMinutes(7), 324935), new(t0.AddMinutes(93), 376326)]);
+        Check("скачок со стрельбища не заработок", s.Earned == 51391 && s.Net == 51391, $"{s.Earned} / {s.Net}");
+        Check("скачок в разы — IsJump", Economy.IsJump(10000, 324935) && !Economy.IsJump(324935, 376326));
+
+        var data = GameData.Load();
+        var m500 = data.Weapons.FirstOrDefault(w => w.Pellets > 1);
+        Check("у дробовика 8 дробин", m500 != null && m500.Pellets == 8, m500 == null ? "нет" : $"{m500.Name} ×{m500.Pellets}");
+        if (m500 != null && Combat.TtkChest(m500, 0) is { } ttk) Check("дробовик без брони убивает за 1–2 выстрела", ttk.Shots <= 2, $"{ttk.Shots}");
+
+        var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
+        var scope = data.Attachments.Values.Where(a => a.SlotKey == "Sight" && a.Zoom >= 4 && a.Fits?.Count > 0).FirstOrDefault();
+        var w4 = scope == null ? null : data.Weapons.FirstOrDefault(w => scope.Fits!.Contains(w.Slug));
+        if (canted != null && scope != null && w4 != null)
+        {
+            var st = Stats.Compute(w4, [scope, canted]);
+            var zoom = st.Value(Stats.Def("AdsZoomMultiplier"));
+            Check("боковой прицел не перебивает зум основного", Math.Abs(zoom - scope.Zoom!.Value) < 1e-6, $"{zoom} при {scope.Zoom}");
+        }
+
+        var ak = data.Weapons.First(w => w.Slots.Length > 2);
+        var sw = Stopwatch.StartNew();
+        var best = Builds.Best(data, ak, [], Priority.Balance, 9_999_999);
+        Check("подбор с бюджетом 9 999 999 быстрый", sw.ElapsedMilliseconds < 500, $"{sw.ElapsedMilliseconds} мс, {best?.Atts.Count ?? 0} обвесов");
+
+        Console.WriteLine(fails == 0 ? "всё ок" : $"провалов: {fails}");
+        return fails == 0 ? 0 : 1;
+    }
+
     static int TestDatabase(string outDir, bool en)
     {
         L.Current = en ? Lang.En : Lang.Ru;

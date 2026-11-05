@@ -21,6 +21,15 @@ sealed class DatabaseForm : Form
     float D => DeviceDpi / 96f;
     int Sc(float px) => (int)Math.Round(px * D);
 
+    /// <summary>Убрать и освободить дочерние элементы. Dispose прямо в foreach по Controls пропускает
+    /// каждый второй (коллекция меняется на ходу), и они копятся с каждым обновлением.</summary>
+    static void ClearControls(Control parent)
+    {
+        var old = parent.Controls.Cast<Control>().ToArray();
+        parent.Controls.Clear();
+        foreach (var c in old) c.Dispose();
+    }
+
     public DatabaseForm(GameData data, Economy economy, string? startTab = null)
     {
         this.data = data;
@@ -779,8 +788,7 @@ sealed class DatabaseForm : Form
             };
             var list = Builds.BestLoadouts(data, req, 6);
             results.SuspendLayout();
-            foreach (Control c in results.Controls) c.Dispose();
-            results.Controls.Clear();
+            ClearControls(results);
             int width = Math.Max(Sc(420), results.ClientSize.Width - Sc(36));
             if (list.Count == 0)
             {
@@ -1027,8 +1035,7 @@ sealed class DatabaseForm : Form
         void Fill()
         {
             flow.SuspendLayout();
-            foreach (Control c in flow.Controls) c.Dispose();
-            flow.Controls.Clear();
+            ClearControls(flow);
             int w = CardWidth();
             // Сначала то, что поменялось у знакомых предметов, потом новинки.
             foreach (var p in data.Patch.OrderBy(p => p.Added && p.Changes.Count == 0 ? 1 : 0))

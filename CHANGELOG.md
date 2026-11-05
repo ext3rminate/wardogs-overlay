@@ -2,6 +2,20 @@
 
 ## English
 
+### Unreleased
+
+- Shooting-range balance ($10 000) no longer counts as income; balance jumps are treated as a new baseline, and earnings per minute skip them.
+- Balance reading tolerates OCR look-alike letters and a detached "$", and returns nothing instead of a value 1000x too small.
+- When a game tooltip covers attachment cells, the overlay keeps the previous result instead of showing unknown attachments; a changed build is shown only after two matching frames.
+- "Start minimized to tray" works again.
+- The app no longer exits when offline if some icons or the patch log are missing; downloaded data is validated before replacing the cache, and icon and settings/economy files are written atomically.
+- Fixed a control leak on the Patch and Budget loadout pages.
+- Shotgun damage counts all pellets and the buckshot armour penalty.
+- A canted sight no longer overrides the main sight's zoom; very large budgets no longer slow down the planner.
+- Weapon detection by icon needs a clear margin or two matching frames; price matches are checked against the icon.
+- Settings values are validated on load; a corrupt settings or economy file is kept as `.corrupt` instead of being overwritten.
+- `--test --self-check` runs logic checks without the game.
+
 ### 1.0.0 — 2026-10-29
 
 - Initial release of Wardogs Overlay.
@@ -14,6 +28,20 @@
 ---
 
 ## Русский
+
+### Не выпущено
+
+- Баланс стрельбища ($10 000) больше не считается заработком; скачок баланса — новая точка отсчёта, в темп заработка не входит.
+- Баланс читается с учётом похожих на цифры букв и отдельного «$»; при ошибке — «не знаю» вместо суммы в 1000 раз меньше.
+- Когда подсказка игры закрывает ячейки, плашка оставляет прежний результат; новый состав сборки показывается после двух одинаковых кадров.
+- Снова работает «Запускать свёрнутым в трей».
+- Без интернета программа не закрывается из-за недокачанных иконок или журнала патчей; скачанная база проверяется до замены, иконки, настройки и экономика пишутся атомарно.
+- Исправлена утечка элементов на страницах «Патч» и «Сборка под бюджет».
+- Урон дробовиков учитывает все дробины и штраф дроби по бронежилету.
+- Боковой прицел больше не подменяет кратность основного; огромный бюджет не тормозит подбор.
+- Пушка по картинке принимается при заметном отрыве или на двух кадрах подряд; совпадение по цене сверяется с картинкой.
+- Значения настроек проверяются при загрузке; битые settings.json и economy.json откладываются в `.corrupt`.
+- `--test --self-check` — проверки логики без игры.
 
 ### 1.0.0 — 2026-10-29
 

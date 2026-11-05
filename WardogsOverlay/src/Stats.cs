@@ -91,15 +91,18 @@ static class Stats
         {
             double v = Base(w, d), mul = 1, add = 0;
             double? ovr = null;
-            foreach (var m in list.SelectMany(a => a.Mods).Where(m => m.Attr == d.Attr))
-            {
-                switch (m.Op)
+            foreach (var a in list)
+                foreach (var m in a.Mods.Where(m => m.Attr == d.Attr))
                 {
-                    case "multiply": mul *= m.Value; break;
-                    case "add": add += m.Value; break;
-                    case "override" when d.Attr != "AimTime": ovr = m.Value; break;
+                    switch (m.Op)
+                    {
+                        case "multiply": mul *= m.Value; break;
+                        case "add": add += m.Value; break;
+                        // Боковой прицел действует, только когда на него переключились: его зум
+                        // и прочие замены не перекрывают основной прицел.
+                        case "override" when d.Attr != "AimTime" && a.SlotKey != "CantedSight": ovr = m.Value; break;
+                    }
                 }
-            }
             final[d.Attr] = (ovr ?? v) * mul + add;
         }
         return new BuildStats { Weapon = w, Final = final };

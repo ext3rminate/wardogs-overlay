@@ -99,6 +99,9 @@ static class Builds
         int keepCost = keep.Sum(a => a.ShopPrice);
         int limit = budget is int b ? Math.Max(0, b - keepCost) : int.MaxValue;
         const int Step = 10;
+        // Дороже, чем самый дорогой обвес на каждый слот, потратить нельзя — больше таблица не нужна
+        // (иначе бюджет 9 999 999 — это миллион столбцов и десятки мегабайт на каждый пересчёт).
+        limit = Math.Min(limit, options.Sum(o => o.Max(x => x.price)));
         int buckets = budget == null ? 1 : limit / Step + 1;
 
         // dp[i][c] — лучший прирост для первых i слотов при цене ≤ c·Step.
@@ -271,6 +274,7 @@ static class Builds
                 .ToList()).ToList();
 
         int limit = Math.Max(0, budget - keep.Sum(a => a.ShopPrice));
+        limit = Math.Min(limit, options.Sum(o => o.Max(x => x.price)));
         const int Step = 10;
         int buckets = limit / Step + 1;
         var dp = new double[slots.Count + 1, buckets];

@@ -167,7 +167,7 @@ static class OverlayRenderer
         y += 34 + 10;
 
         var chips = new List<string>();
-        if (w.Damage is int dmg) chips.Add(L.T($"Урон {dmg}", $"Dmg {dmg}"));
+        if (w.Damage is int dmg) chips.Add(w.Pellets > 1 ? L.T($"Урон {dmg}×{w.Pellets}", $"Dmg {dmg}×{w.Pellets}") : L.T($"Урон {dmg}", $"Dmg {dmg}"));
         if (w.Rpm is int rpm) chips.Add(L.T($"{rpm} в/мин", $"{rpm} rpm"));
         if (w.Range is int rng) chips.Add(L.T($"{rng} м", $"{rng} m"));
         chips.Add("ADS " + Stats.Sec(m.Now.Base(Stats.Def("AimTime"))));

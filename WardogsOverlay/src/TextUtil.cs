@@ -100,7 +100,24 @@ static class TextUtil
 
     public static int? ParsePrice(string s)
     {
-        var digits = new string(s.Where(char.IsDigit).ToArray());
+        var digits = new string(s.Where(char.IsAsciiDigit).ToArray());
         return digits.Length is > 0 and <= 6 ? int.Parse(digits) : null;
+    }
+
+    /// <summary>Буквы, которые OCR путает с цифрами в суммах: О→0, З→3, б→6, В→8, l/I/|→1.</summary>
+    public static string DigitLike(string s)
+    {
+        var sb = new StringBuilder(s.Length);
+        foreach (var c in s)
+            sb.Append(c switch
+            {
+                'O' or 'o' or 'О' or 'о' or 'D' => '0',
+                'З' or 'з' => '3',
+                'б' => '6',
+                'В' or 'B' => '8',
+                'l' or 'I' or '|' or '!' or 'і' => '1',
+                _ => c,
+            });
+        return sb.ToString();
     }
 }

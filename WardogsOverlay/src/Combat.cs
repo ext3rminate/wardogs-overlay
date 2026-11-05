@@ -12,12 +12,13 @@ static class Combat
     public static int ArmourReduction(GameData data, int level) =>
         level <= 0 ? 0 : data.Armour.TryGetValue($"level-{level}-armor", out var a) ? a.Reduction : 0;
 
-    /// <summary>Сколько выстрелов в грудь и за сколько секунд при беспрерывной стрельбе.</summary>
+    /// <summary>Сколько выстрелов в грудь и за сколько секунд при беспрерывной стрельбе (у дроби — все дробины попали).</summary>
     public static (int Shots, double Seconds)? TtkChest(Weapon w, int reductionPct)
     {
         // У гранатомётов урон — взрыв, «выстрелов в грудь» для них не бывает.
         if (w.Sub == "Launcher" || w.Damage is not int dmg || w.Rpm is not int rpm || rpm <= 0) return null;
-        double perShot = dmg * w.Hit.GetValueOrDefault("torso_middle", 1.0) * (1 - reductionPct / 100.0);
+        double perShot = dmg * w.Pellets * w.Hit.GetValueOrDefault("torso_middle", 1.0) * (1 - reductionPct / 100.0);
+        if (reductionPct > 0) perShot *= 1 + w.ArmourAmmoPct / 100.0; // дробь по бронежилету слабее
         if (perShot <= 0) return null;
         int shots = (int)Math.Ceiling(Health / perShot - 1e-9);
         return (shots, (shots - 1) * 60.0 / rpm);

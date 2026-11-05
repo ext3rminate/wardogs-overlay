@@ -451,18 +451,23 @@ sealed class MainForm : Form
 
     protected override void SetVisibleCore(bool value)
     {
-        // Запуск «в трей»: окно создаётся, но не показывается.
-        if (!IsHandleCreated && settings.StartMinimized)
+        // Запуск «в трей»: окно не показывается. Handle уже создан в конструкторе (ради DPI),
+        // поэтому первый показ отмечаем флагом, а не по IsHandleCreated.
+        if (value && !firstShowHandled)
         {
-            CreateHandle();
-            value = false;
-            BeginInvoke(StartAsync);
+            firstShowHandled = true;
+            if (settings.StartMinimized && !Preview)
+            {
+                value = false;
+                BeginInvoke(StartAsync);
+            }
         }
         base.SetVisibleCore(value);
     }
 
     /// <summary>Только для проверки внешнего вида: окно показывается, но поиск и база не запускаются.</summary>
     public bool Preview { get; init; }
+    bool firstShowHandled;
 
     protected override void OnShown(EventArgs e)
     {
@@ -485,10 +490,15 @@ sealed class MainForm : Form
             var data = GameData.Load();
             if (data.NeedsUpdate)
             {
-                // База от прошлой версии — докачиваем иконки пушек и журнал патчей.
+                // База от прошлой версии — докачиваем иконки пушек и журнал патчей. Не вышло (нет сети) —
+                // работаем на том, что уже скачано, а не закрываемся.
                 lblBase.Text = L.T("докачиваю недостающее…", "downloading missing data…");
-                await Task.Run(() => GameData.DownloadAsync(s => BeginInvoke(() => lblBase.Text = s)));
-                data = GameData.Load();
+                try
+                {
+                    await Task.Run(() => GameData.DownloadAsync(s => BeginInvoke(() => lblBase.Text = s)));
+                    data = GameData.Load();
+                }
+                catch (Exception ex) { Log.Info("Докачать базу не удалось, работаю на скачанной: " + ex.Message); }
             }
             var ocr = new OcrService();
             recognizer = new Recognizer(ocr) { Data = data };
