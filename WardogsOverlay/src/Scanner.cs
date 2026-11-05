@@ -38,6 +38,8 @@ sealed class Scanner : IDisposable
     public bool Enabled { get; private set; } = true;
     public string GameStatus { get; private set; } = L.T("ищу…", "looking…");
     public bool GameFound { get; private set; }
+    /// <summary>Игра на переднем плане — не время перезапускаться ради обновления.</summary>
+    public bool GameForeground => lastForeground;
     public string PlaqueStatus { get; private set; } = "—";
     public event Action? StatusChanged;
 

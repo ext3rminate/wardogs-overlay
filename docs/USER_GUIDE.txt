@@ -62,6 +62,13 @@ Settings
   visibility, build priority and budget, and start minimized to tray.
   Settings are stored in settings.json next to the executable.
 
+Updates
+  The application checks GitHub Releases at startup and every 6 hours. With "Update
+  automatically" on, it installs the new version while the game is in the background and
+  restarts in the tray; otherwise a banner in the main window offers Update, What's new,
+  or Skip this version. Downloads are verified against SHA256SUMS.txt from the release.
+  If the folder is read-only (for example, Program Files), the release page opens instead.
+
 How it works
   • The application does not open the game process, read its memory, inject code,
     or modify game files.
@@ -147,6 +154,13 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
   Размер и непрозрачность плашки, компактный режим (только главные статы), варианты для слота,
   скрытие плашки от записи/стрима, приоритет и бюджет подбора, запуск свёрнутым в трей.
   Всё хранится в settings.json рядом с программой.
+
+Обновления
+  Программа проверяет GitHub Releases при запуске и раз в 6 часов. С флагом «Обновлять
+  автоматически» новая версия ставится сама, пока игра в фоне, и программа перезапускается
+  в трее; без флага вверху окна появляется баннер: «Обновить», «Что нового», «Пропустить версию».
+  Скачанный файл сверяется с SHA256SUMS.txt из релиза. Если папка только для чтения
+  (например, Program Files), открывается страница релиза.
 
 Как это работает
   • Программа не открывает процесс игры, не читает её память, ничего не внедряет, не трогает файлы игры.

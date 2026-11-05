@@ -21,7 +21,18 @@ sealed class MainForm : Form
     // Элементы пересоздаются при смене языка и DPI.
     Panel scroll = null!;
     Segmented segLang = null!, segPrio = null!;
-    Toggle tSearch = null!, tOptions = null!, tCompact = null!, tMoney = null!, tHide = null!, tTray = null!;
+    Toggle tSearch = null!, tOptions = null!, tCompact = null!, tMoney = null!, tHide = null!, tTray = null!, tAuto = null!;
+    Label lblUpdVal = null!;
+    Label? lblBannerStatus;
+    UiButton btnCheck = null!;
+    UiButton? btnInstall;
+    // Обновление: что нашли на GitHub и что с ним сейчас происходит.
+    UpdateInfo? update;
+    string? updateError;
+    bool checkingUpdate, installing, updateChecked;
+    string? autoFailed;
+    readonly System.Windows.Forms.Timer updTimer = new() { Interval = 60_000 };
+    long nextUpdateCheck;
     Label lblSearchVal = null!, lblGameVal = null!, lblPlaqueVal = null!, lblMoneyVal = null!, lblBase = null!, lblScaleVal = null!, lblOpacityVal = null!;
     PaintBox gameDot = null!;
     Slider slScale = null!, slOpacity = null!;
@@ -63,6 +74,7 @@ sealed class MainForm : Form
         menu.Items.AddRange([miOpen, miDb, miToggle, new ToolStripSeparator(), miExit]);
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => ShowFromTray();
+        tray.BalloonTipClicked += (_, _) => { if (update != null) ShowFromTray(); };
         ApplyTexts();
 
         settings.Changed += () => { if (IsHandleCreated) BeginInvoke(LoadSettingsToUi); };
@@ -81,6 +93,8 @@ sealed class MainForm : Form
 
     void BuildLayout()
     {
+        lblBannerStatus = null;
+        btnInstall = null;
         int W = Sc(620);
         scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Bg, Padding = new Padding(Sc(20), Sc(16), Sc(20), Sc(20)) };
         Theme.DarkScrollbars(scroll);
@@ -123,6 +137,7 @@ sealed class MainForm : Form
         };
         head.Controls.Add(logo, 0, 0); head.Controls.Add(titles, 1, 0); head.Controls.Add(segLang, 2, 0);
         col.Controls.Add(head);
+        if (update != null && settings.SkippedUpdate != update.Tag) col.Controls.Add(UpdateBanner(inner));
 
         // --- плитки состояния
         var tiles = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, Width = inner, Height = Sc(82) * 2 + Sc(10), Margin = new Padding(0, 0, 0, Sc(14)), BackColor = Theme.Bg };
@@ -261,6 +276,25 @@ sealed class MainForm : Form
         budgetHint.MaximumSize = new Size(inner - Sc(36), 0);
         best.Body.Controls.Add(budgetHint);
         col.Controls.Add(best.Card);
+
+        // --- карточка «Обновления»
+        var upd = CardColumn(inner);
+        upd.Body.Controls.Add(Section(L.T("Обновления", "Updates")));
+        tAuto = ToggleRow(upd.Body, inner, L.T("Обновлять автоматически", "Update automatically"),
+            L.T("Ставлю новую версию с GitHub, пока игра свёрнута", "Installs new GitHub releases while the game is in the background"),
+            v => { settings.AutoUpdate = v; if (v) BeginInvoke(MaybeAutoInstall); });
+        var updRow = new TableLayoutPanel { ColumnCount = 2, Width = inner - Sc(36), Height = Sc(44), BackColor = Color.Transparent, Margin = new Padding(0, Sc(4), 0, 0) };
+        updRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        updRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        lblUpdVal = Lbl("", 13, 400, Theme.Muted);
+        lblUpdVal.Anchor = AnchorStyles.Left;
+        updRow.Controls.Add(lblUpdVal, 0, 0);
+        btnCheck = new UiButton { Kind = ButtonKind.Ghost, Text = L.T("Проверить", "Check now"), Height = Sc(38), Font = Theme.UiFont(13, 500), Margin = Padding.Empty, Anchor = AnchorStyles.Right };
+        btnCheck.Width = btnCheck.PreferredWidth(DeviceDpi);
+        btnCheck.Click += async (_, _) => await CheckForUpdate(manual: true);
+        updRow.Controls.Add(btnCheck, 1, 0);
+        upd.Body.Controls.Add(updRow);
+        col.Controls.Add(upd.Card);
 
         // --- карточка «Клавиши в игре»
         var keys = CardColumn(inner);
@@ -442,6 +476,8 @@ sealed class MainForm : Form
         tMoney.Checked = settings.ShowMoney;
         tHide.Checked = settings.HideFromCapture;
         tTray.Checked = settings.StartMinimized;
+        tAuto.Checked = settings.AutoUpdate;
+        RefreshUpdateUi();
         segPrio.SelectedIndex = settings.BestPriority switch { Priority.Balance => 1, Priority.Recoil => 2, Priority.Handling => 3, _ => 0 };
         if (!budget.Box.Focused) budget.Box.Text = settings.BestBudget > 0 ? settings.BestBudget.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : "0";
         loading = false;
@@ -456,7 +492,7 @@ sealed class MainForm : Form
         if (value && !firstShowHandled)
         {
             firstShowHandled = true;
-            if (settings.StartMinimized && !Preview)
+            if ((settings.StartMinimized || StartHidden) && !Preview)
             {
                 value = false;
                 BeginInvoke(StartAsync);
@@ -467,6 +503,8 @@ sealed class MainForm : Form
 
     /// <summary>Только для проверки внешнего вида: окно показывается, но поиск и база не запускаются.</summary>
     public bool Preview { get; init; }
+    /// <summary>Перезапуск после фонового автообновления: окно не открываем, только сообщаем в трее.</summary>
+    public bool StartHidden { get; init; }
     bool firstShowHandled;
 
     protected override void OnShown(EventArgs e)
@@ -517,6 +555,180 @@ sealed class MainForm : Form
         scanner.Start();
         Log.Info($"База от {recognizer.Data.Version}: пушек {recognizer.Data.Weapons.Count}, обвесов {recognizer.Data.Attachments.Count}");
         RefreshStatus();
+        if (StartHidden)
+            tray.ShowBalloonTip(4000, L.T($"Wardogs оверлей обновлён до {Updater.CurrentText}", $"Wardogs overlay updated to {Updater.CurrentText}"),
+                L.T("Работает в трее, как и раньше.", "Running in the tray as before."), ToolTipIcon.Info);
+
+        // Обновления: при запуске и потом раз в 6 часов; автоустановка ждёт, пока игра уйдёт с переднего плана.
+        updTimer.Tick += async (_, _) =>
+        {
+            if (Environment.TickCount64 >= nextUpdateCheck) await CheckForUpdate(manual: false);
+            else MaybeAutoInstall();
+        };
+        updTimer.Start();
+        await CheckForUpdate(manual: false);
+    }
+
+    // ---------- обновление программы ----------
+
+    async Task CheckForUpdate(bool manual)
+    {
+        if (checkingUpdate || installing) return;
+        checkingUpdate = true;
+        nextUpdateCheck = Environment.TickCount64 + 6 * 3600_000L;
+        updateError = null;
+        RefreshUpdateUi();
+        try
+        {
+            var found = await Task.Run(Updater.CheckAsync);
+            updateChecked = true;
+            bool isNew = found != null && found.Tag != update?.Tag;
+            update = found;
+            if (manual && found != null && settings.SkippedUpdate == found.Tag)
+            {
+                // «Проверить» руками — показываем и пропущенную ранее версию.
+                settings.SkippedUpdate = null;
+                settings.Save();
+            }
+            if (isNew)
+            {
+                Log.Info($"Доступно обновление {found!.Tag}");
+                Rebuild(); // баннер вверху окна
+                if (!Visible && !settings.AutoUpdate && settings.SkippedUpdate != found.Tag)
+                    tray.ShowBalloonTip(5000, L.T($"Доступна версия {found.Version.ToString(3)}", $"Version {found.Version.ToString(3)} is available"),
+                        L.T("Нажми, чтобы открыть окно и обновиться.", "Click to open the window and update."), ToolTipIcon.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info("Проверка обновлений не удалась: " + ex.Message);
+            if (manual) updateError = L.T("не удалось проверить: ", "check failed: ") + ex.Message;
+        }
+        finally
+        {
+            checkingUpdate = false;
+            RefreshUpdateUi();
+        }
+        MaybeAutoInstall();
+    }
+
+    /// <summary>Автообновление: ставим, только когда игра не на переднем плане (не перезапускаемся посреди матча).</summary>
+    void MaybeAutoInstall()
+    {
+        if (!settings.AutoUpdate || update == null || installing || checkingUpdate) return;
+        if (settings.SkippedUpdate == update.Tag || autoFailed == update.Tag || scanner?.GameForeground == true || !Updater.CanSelfUpdate()) return;
+        _ = InstallUpdate(auto: true);
+    }
+
+    async Task InstallUpdate(bool auto = false)
+    {
+        if (update == null || installing) return;
+        if (!Updater.CanSelfUpdate())
+        {
+            // Папка только для чтения (например, Program Files) — обновить можно только вручную.
+            Process.Start(new ProcessStartInfo(update.PageUrl) { UseShellExecute = true });
+            return;
+        }
+        installing = true;
+        updateError = null;
+        RefreshUpdateUi();
+        try
+        {
+            await Task.Run(() => Updater.InstallAsync(update, s => BeginInvoke(() => SetUpdateProgress(s))));
+            economy.Save();
+            // Сам обновился в фоне — новая версия тоже стартует в трее, а не открывает окно поверх всего.
+            Updater.Restart(hidden: auto && !Visible);
+            ExitApp();
+        }
+        catch (Exception ex)
+        {
+            Log.Info("Обновление не удалось: " + ex);
+            updateError = L.T("не удалось обновить: ", "update failed: ") + ex.Message;
+            installing = false;
+            // Сам больше не пробую эту версию (иначе попытка каждую минуту) — кнопка «Обновить» остаётся.
+            autoFailed = update.Tag;
+            RefreshUpdateUi();
+        }
+    }
+
+    void SetUpdateProgress(string s)
+    {
+        if (lblBannerStatus != null) lblBannerStatus.Text = s;
+        lblUpdVal.Text = s;
+    }
+
+    void RefreshUpdateUi()
+    {
+        if (lblUpdVal == null) return;
+        string text;
+        if (installing) text = L.T("устанавливаю обновление…", "installing the update…");
+        else if (checkingUpdate) text = L.T("проверяю GitHub…", "checking GitHub…");
+        else if (updateError != null) text = updateError;
+        else if (update != null) text = L.T($"доступна {update.Version.ToString(3)} (сейчас {Updater.CurrentText})", $"{update.Version.ToString(3)} available (current {Updater.CurrentText})");
+        else if (updateChecked) text = L.T($"версия {Updater.CurrentText} — последняя", $"version {Updater.CurrentText} — up to date");
+        else text = L.T($"версия {Updater.CurrentText}", $"version {Updater.CurrentText}");
+        lblUpdVal.Text = text;
+        lblUpdVal.ForeColor = updateError != null ? Theme.BadText : update != null ? Theme.Accent : Theme.Muted;
+        lblUpdVal.MaximumSize = new Size(Math.Max(Sc(120), (lblUpdVal.Parent?.Width ?? Sc(400)) - btnCheck.Width - Sc(12)), 0);
+        btnCheck.Enabled = !checkingUpdate && !installing;
+        if (btnInstall != null) btnInstall.Enabled = !installing;
+        if (lblBannerStatus != null && installing) lblBannerStatus.Text = text;
+    }
+
+    Card UpdateBanner(int inner)
+    {
+        var u = update!;
+        var card = new Card { Width = inner, Height = Sc(100), Padding = new Padding(Sc(18), Sc(14), Sc(18), Sc(14)), Margin = new Padding(0, 0, 0, Sc(14)), Border = Theme.Accent };
+        var body = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Panel, Margin = Padding.Empty, Dock = DockStyle.Top,
+        };
+        card.Controls.Add(body);
+        body.SizeChanged += (_, _) => card.Height = body.Height + card.Padding.Vertical;
+
+        body.Controls.Add(Lbl(L.T($"Доступна версия {u.Version.ToString(3)}", $"Version {u.Version.ToString(3)} is available"), 16, 700, Theme.Accent));
+        var notes = Updater.ShortNotes(u);
+        if (notes.Length > 0)
+        {
+            var n = Lbl(notes, 13, 400, Theme.Muted);
+            n.MaximumSize = new Size(inner - Sc(36), 0);
+            n.Margin = new Padding(0, Sc(6), 0, 0);
+            body.Controls.Add(n);
+        }
+        lblBannerStatus = Lbl(Updater.CanSelfUpdate()
+                ? L.T($"Сейчас {Updater.CurrentText}. Программа перезапустится сама, настройки и история сохранятся.",
+                      $"Current {Updater.CurrentText}. The app restarts by itself; settings and history are kept.")
+                : L.T("Папка программы только для чтения — скачай новую версию со страницы релиза.",
+                      "The app folder is read-only — download the new version from the release page."), 12, 400, Theme.Faint);
+        lblBannerStatus.MaximumSize = new Size(inner - Sc(36), 0);
+        lblBannerStatus.Margin = new Padding(0, Sc(8), 0, Sc(10));
+        body.Controls.Add(lblBannerStatus);
+
+        var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Panel, Margin = Padding.Empty };
+        UiButton Btn(string text, ButtonKind kind, Func<Task> click)
+        {
+            var b = new UiButton { Kind = kind, Text = text, Height = Sc(40), Font = Theme.UiFont(13, 600), Margin = new Padding(0, 0, Sc(8), 0) };
+            b.Width = b.PreferredWidth(DeviceDpi);
+            b.Click += async (_, _) => await click();
+            buttons.Controls.Add(b);
+            return b;
+        }
+        btnInstall = Btn(Updater.CanSelfUpdate() ? L.T("Обновить", "Update") : L.T("Открыть релиз", "Open release"), ButtonKind.Primary, () => InstallUpdate());
+        Btn(L.T("Что нового", "What's new"), ButtonKind.Secondary, () =>
+        {
+            Process.Start(new ProcessStartInfo(u.PageUrl) { UseShellExecute = true });
+            return Task.CompletedTask;
+        });
+        Btn(L.T("Пропустить версию", "Skip this version"), ButtonKind.Ghost, () =>
+        {
+            settings.SkippedUpdate = u.Tag;
+            settings.Save();
+            Rebuild();
+            return Task.CompletedTask;
+        });
+        body.Controls.Add(buttons);
+        return card;
     }
 
     void RefreshStatus()
@@ -611,6 +823,7 @@ sealed class MainForm : Form
     void ExitApp()
     {
         exiting = true;
+        updTimer.Stop();
         tray.Visible = false;
         scanner?.Dispose();
         economy.Save();
@@ -620,7 +833,7 @@ sealed class MainForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) tray.Dispose();
+        if (disposing) { tray.Dispose(); updTimer.Dispose(); }
         base.Dispose(disposing);
     }
 }

@@ -4,6 +4,7 @@
 
 ### Unreleased
 
+- Update check from GitHub Releases at startup and every 6 hours, with an update banner (Update, What's new, Skip this version) and an "Update automatically" toggle on the main window. Downloads are verified with SHA256SUMS.txt; automatic installs wait until the game is in the background.
 - Shooting-range balance ($10 000) no longer counts as income; balance jumps are treated as a new baseline, and earnings per minute skip them.
 - Balance reading tolerates OCR look-alike letters and a detached "$", and returns nothing instead of a value 1000x too small.
 - When a game tooltip covers attachment cells, the overlay keeps the previous result instead of showing unknown attachments; a changed build is shown only after two matching frames.
@@ -31,6 +32,7 @@
 
 ### Не выпущено
 
+- Проверка обновлений на GitHub при запуске и раз в 6 часов: баннер «Обновить / Что нового / Пропустить версию» и флаг «Обновлять автоматически» на главной. Скачанный файл сверяется с SHA256SUMS.txt; автоустановка ждёт, пока игра уйдёт в фон.
 - Баланс стрельбища ($10 000) больше не считается заработком; скачок баланса — новая точка отсчёта, в темп заработка не входит.
 - Баланс читается с учётом похожих на цифры букв и отдельного «$»; при ошибке — «не знаю» вместо суммы в 1000 раз меньше.
 - Когда подсказка игры закрывает ячейки, плашка оставляет прежний результат; новый состав сборки показывается после двух одинаковых кадров.

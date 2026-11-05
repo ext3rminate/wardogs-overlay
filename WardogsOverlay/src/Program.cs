@@ -20,8 +20,13 @@ static class Program
         var settings = Settings.Load();
         L.Current = settings.Language;
 
-        // Второй экземпляр не нужен: две плашки и двойные горячие клавиши.
-        using var single = new Mutex(true, @"Local\WardogsOverlay.SingleInstance", out bool first);
+        // Второй экземпляр не нужен: две плашки и двойные горячие клавиши. После обновления новая
+        // версия стартует, пока старая ещё закрывается, — ждём её.
+        bool afterUpdate = args.Contains("--after-update");
+        using var single = new Mutex(false, @"Local\WardogsOverlay.SingleInstance");
+        bool first;
+        try { first = single.WaitOne(afterUpdate ? 20_000 : 0); }
+        catch (AbandonedMutexException) { first = true; }
         if (!first)
         {
             MessageBox.Show(L.T("Wardogs оверлей уже запущен — значок в трее рядом с часами.",
@@ -36,11 +41,12 @@ static class Program
         Application.ThreadException += (_, e) => Log.Info("Ошибка интерфейса: " + e.Exception);
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Info("Фатальная ошибка: " + e.ExceptionObject);
 
-        Log.Info("Запуск");
+        Log.Info(afterUpdate ? $"Запуск после обновления, версия {Updater.CurrentText}" : $"Запуск, версия {Updater.CurrentText}");
+        Updater.CleanupOld();
         Ui.Theme.Load();
         using var overlay = new OverlayForm(settings);
         _ = overlay.Handle; // окно плашки создаётся сразу, но скрыто
-        using var main = new MainForm(settings, overlay);
+        using var main = new MainForm(settings, overlay) { StartHidden = args.Contains("--hidden") };
         Application.Run(main);
         return 0;
     }

@@ -33,6 +33,7 @@ static class TestMode
             using var ov = new OverlayForm(st);
             using var mf = new MainForm(st, ov) { Preview = true, StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
             mf.Show();
+            if (files.Contains("--tall")) mf.Height = 2400; // всё окно целиком, без прокрутки
             var until = Environment.TickCount64 + 600;
             while (Environment.TickCount64 < until) { Application.DoEvents(); Thread.Sleep(10); }
             using var bmp = new Bitmap(mf.Width, mf.Height);

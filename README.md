@@ -15,7 +15,7 @@ An overlay for **Wardogs** with weapon and attachment stats in the build menu, a
 
 Closing the window minimizes the application to the system tray. To quit completely, use the tray icon menu. On first launch, the application downloads data and icons from [MetaForge](https://metaforge.app/wardogs).
 
-To update, quit the application through the tray menu and extract the new version over the old one. Personal settings and session history are stored locally.
+The application checks GitHub Releases at startup and every 6 hours. With **Update automatically** on (the default), it downloads the new version, verifies it against `SHA256SUMS.txt`, and restarts while the game is in the background; otherwise it shows an update banner in the main window. To update manually, quit through the tray menu and extract the new version over the old one. Personal settings and session history are kept.
 
 ### Features
 
@@ -98,7 +98,7 @@ Game data and icons are downloaded from MetaForge and are not included in the so
 
 Крестик сворачивает приложение в трей. Полный выход — через меню значка рядом с часами. При первом запуске программа скачивает данные и иконки с [MetaForge](https://metaforge.app/wardogs).
 
-При обновлении закрой приложение через трей и распакуй новую версию поверх старой. Личные настройки и история сессий создаются локально.
+Приложение проверяет GitHub Releases при запуске и раз в 6 часов. С включённым флагом **«Обновлять автоматически»** (по умолчанию) оно само скачивает новую версию, сверяет её с `SHA256SUMS.txt` и перезапускается, пока игра в фоне; если флаг выключен — показывает баннер с предложением обновиться. Вручную: закрой приложение через трей и распакуй новую версию поверх старой. Личные настройки и история сессий сохраняются.
 
 ### Возможности
 

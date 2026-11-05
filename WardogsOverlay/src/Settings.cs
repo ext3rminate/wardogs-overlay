@@ -32,6 +32,10 @@ sealed class Settings
     public bool CompactMode { get; set; }
     /// <summary>Строка экономики (заработок за сессию) внизу плашки.</summary>
     public bool ShowMoney { get; set; } = true;
+    /// <summary>Ставить новые версии с GitHub самому (когда игра не на переднем плане). Выключено — только предлагать.</summary>
+    public bool AutoUpdate { get; set; } = true;
+    /// <summary>Версия, которую попросили не предлагать («Пропустить»).</summary>
+    public string? SkippedUpdate { get; set; }
     /// <summary>Сохранять снимок в debug, если меню видно, а пушку или обвес узнать не удалось.</summary>
     public bool AutoDebugFrames { get; set; } = true;
 
