@@ -36,6 +36,10 @@ sealed class Settings
     public bool AutoUpdate { get; set; } = true;
     /// <summary>Версия, которую попросили не предлагать («Пропустить»).</summary>
     public string? SkippedUpdate { get; set; }
+    /// <summary>Сборка игры, чей патч пользователь уже видел (баннер «Вышел патч» больше не показываем).</summary>
+    public string? SeenPatchBuild { get; set; }
+    /// <summary>Пушки, которые оверлей узнавал в меню, — для фильтра «Мои пушки» в разделе «Патч».</summary>
+    public List<string> MyWeapons { get; set; } = [];
     /// <summary>Сохранять снимок в debug, если меню видно, а пушку или обвес узнать не удалось.</summary>
     public bool AutoDebugFrames { get; set; } = true;
 
@@ -84,6 +88,7 @@ sealed class Settings
     Settings Sanitized()
     {
         WindowClass ??= "";
+        MyWeapons ??= [];
         if (WindowTitleContains == null || WindowTitleContains.Length == 0) WindowTitleContains = new Settings().WindowTitleContains;
         OverlayScale = double.IsFinite(OverlayScale) ? Math.Clamp(OverlayScale, 0.5, 3) : 1;
         Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.94;

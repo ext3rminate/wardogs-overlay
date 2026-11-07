@@ -101,8 +101,12 @@ sealed class PatchItem
     public required string Name { get; init; }
     public required string Tab { get; init; }
     public bool Added { get; init; }
+    public bool Removed { get; init; }
     public List<PatchChange> Changes { get; } = [];
 }
+
+/// <summary>Официальная запись разработчиков в Steam (заметки к патчу, анонсы).</summary>
+sealed record NewsPost(string Title, DateTime Date, string Url, string Text);
 
 /// <summary>
 /// База пушек и обвесов с MetaForge (metaforge.app — данные из файлов игры).
@@ -114,7 +118,11 @@ sealed class GameData
     const string IconUrl = "https://static.metaforge.app/wardogs/icons/";
     static readonly string[] Files = ["database", "attachment-stats", "ballistics/v2"];
     /// <summary>Необязательные файлы: без них программа работает, просто без раздела «Патч».</summary>
-    static readonly string[] OptionalFiles = ["changelog"];
+    static readonly string[] OptionalFiles = ["changelog", NewsFile];
+    /// <summary>Официальные анонсы и заметки к патчам из Steam (открытый API новостей, без ключа).</summary>
+    const string NewsFile = "steam-news";
+    const string NewsUrl = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=1867240&count=12&maxlength=0&feeds=steam_community_announcements&format=json";
+    static string UrlOf(string name) => name == NewsFile ? NewsUrl : Api + name;
 
     public static string Dir => Path.Combine(AppContext.BaseDirectory, "data");
     static string IconDir => Path.Combine(Dir, "icons");
@@ -133,6 +141,11 @@ sealed class GameData
     public List<PatchItem> Patch { get; } = [];
     public string PatchTitle { get; private set; } = "";
     public string PatchDate { get; private set; } = "";
+    /// <summary>Сборка игры, с которой снята база (CL-516586) — по ней видно, что вышел новый патч.</summary>
+    public string PatchBuild { get; private set; } = "";
+    public string PatchPreviousDate { get; private set; } = "";
+    /// <summary>Официальные записи разработчиков в Steam, новые сверху.</summary>
+    public List<NewsPost> News { get; } = [];
     public string Version { get; private set; } = "";
 
     public static bool IsDownloaded => Files.All(f => File.Exists(JsonPath(f)));
@@ -155,17 +168,23 @@ sealed class GameData
         return File.Exists(p) && new FileInfo(p).Length > 0 ? p : null;
     }
 
-    public static async Task DownloadAsync(Action<string> report)
+    /// <summary>
+    /// Скачать базу. Возвращает true, если что-то поменялось (новые данные или иконки) —
+    /// тогда базу нужно перечитать; false — на сервере то же самое, что уже лежит у нас.
+    /// </summary>
+    public static async Task<bool> DownloadAsync(Action<string> report)
     {
         Directory.CreateDirectory(Dir);
         Directory.CreateDirectory(IconDir);
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        using var http = new HttpClient(new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All })
+            { Timeout = TimeSpan.FromSeconds(30) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("WardogsOverlay/1.0 (+personal, non-commercial)");
 
         // Сначала всё скачиваем рядом (.new) и пробуем открыть базу из новых файлов. Рабочие файлы
         // заменяем, только если база открылась: ответ сервера не того вида не должен сломать то, что работало.
         var all = Files.Concat(OptionalFiles).ToList();
         foreach (var name in all) File.Delete(StagedPath(name));
+        bool changed = false;
         try
         {
             foreach (var name in all)
@@ -173,7 +192,7 @@ sealed class GameData
                 report(L.T($"Скачиваю {name}…", $"Downloading {name}…"));
                 try
                 {
-                    var text = await http.GetStringAsync(Api + name);
+                    var text = await http.GetStringAsync(UrlOf(name));
                     using (JsonDocument.Parse(text)) { } // проверка, что пришёл JSON, а не страница ошибки
                     await File.WriteAllTextAsync(StagedPath(name), text);
                 }
@@ -186,7 +205,12 @@ sealed class GameData
                                                    "metaforge.app returned data in an unexpected format; keeping the previous data."), e);
             }
             foreach (var name in all.Where(n => File.Exists(StagedPath(n))))
+            {
+                if (File.Exists(JsonPath(name)) && File.ReadAllText(JsonPath(name)) == File.ReadAllText(StagedPath(name))) continue;
                 File.Move(StagedPath(name), JsonPath(name), true);
+                changed = true;
+            }
+            File.WriteAllText(LastCheckPath, DateTime.UtcNow.ToString("O"));
         }
         finally
         {
@@ -222,7 +246,15 @@ sealed class GameData
         File.WriteAllLines(MissingIconsPath, notFound.Order());
         report(failed == 0 ? L.T("База обновлена.", "Data updated.")
                            : L.T($"База обновлена, не скачалось иконок: {failed}.", $"Data updated, icons failed: {failed}."));
+        return changed || icons.Count > failed;
     }
+
+    static string LastCheckPath => Path.Combine(Dir, ".last-check");
+
+    /// <summary>Когда базу последний раз сверяли с сервером (чтобы не качать при каждом перезапуске).</summary>
+    public static DateTime LastCheck =>
+        File.Exists(LastCheckPath) && DateTime.TryParse(File.ReadAllText(LastCheckPath), null, System.Globalization.DateTimeStyles.RoundtripKind, out var t)
+            ? t : DateTime.MinValue;
 
     public static GameData Load() => Load(staged: false);
 
@@ -344,6 +376,7 @@ sealed class GameData
 
         ReadBallistics(bal.RootElement, gd, weaponsBySlug);
         ReadChangelog(gd, staged);
+        ReadNews(gd, staged);
         if (gd.Weapons.Count == 0 || gd.Attachments.Count == 0)
             throw new InvalidDataException(L.T("в базе нет пушек или обвесов", "data has no weapons or attachments"));
         return gd;
@@ -413,14 +446,16 @@ sealed class GameData
             if (!doc.RootElement.TryGetProperty("current", out var cur)) return;
             gd.PatchTitle = Str(cur, "title") ?? "";
             gd.PatchDate = Str(cur, "date") ?? "";
-            foreach (var (prop, added) in new[] { ("added", true), ("changed", false) })
+            gd.PatchBuild = Str(cur, "build") ?? "";
+            gd.PatchPreviousDate = Str(cur, "previousDate") ?? "";
+            foreach (var (prop, kind) in new[] { ("added", 1), ("changed", 0), ("removed", -1) })
             {
                 if (!cur.TryGetProperty(prop, out var list) || list.ValueKind != JsonValueKind.Array) continue;
                 foreach (var x in list.EnumerateArray())
                 {
                     var item = new PatchItem
                     {
-                        Id = Str(x, "id") ?? "", Name = Str(x, "name") ?? "?", Tab = Str(x, "tab") ?? "", Added = added,
+                        Id = Str(x, "id") ?? "", Name = Str(x, "name") ?? "?", Tab = Str(x, "tab") ?? "", Added = kind > 0, Removed = kind < 0,
                     };
                     if (x.TryGetProperty("changes", out var ch) && ch.ValueKind == JsonValueKind.Array)
                         foreach (var c in ch.EnumerateArray())
@@ -434,6 +469,25 @@ sealed class GameData
             }
         }
         catch (Exception e) { Log.Info("Журнал патчей не читается: " + e.Message); }
+    }
+
+    static void ReadNews(GameData gd, bool staged)
+    {
+        var path = ReadPath(NewsFile, staged);
+        if (!File.Exists(path)) return;
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(path));
+            if (!doc.RootElement.TryGetProperty("appnews", out var app) || !app.TryGetProperty("newsitems", out var items) ||
+                items.ValueKind != JsonValueKind.Array) return;
+            foreach (var n in items.EnumerateArray())
+            {
+                var date = n.TryGetProperty("date", out var d) && d.TryGetInt64(out var unix) ? DateTimeOffset.FromUnixTimeSeconds(unix).LocalDateTime : DateTime.MinValue;
+                gd.News.Add(new NewsPost(Str(n, "title") ?? "", date, Str(n, "url") ?? "", TextUtil.CleanSteamText(Str(n, "contents") ?? "")));
+            }
+            gd.News.Sort((a, b) => b.Date.CompareTo(a.Date));
+        }
+        catch (Exception e) { Log.Info("Новости Steam не читаются: " + e.Message); }
     }
 
     /// <summary>Значение из журнала патчей текстом: число, строка или «список из N».</summary>

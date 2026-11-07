@@ -2,6 +2,11 @@
 
 ## English
 
+### Unreleased
+
+- Game data refreshes automatically from MetaForge at startup (if not checked within an hour) and every 6 hours, and is swapped in without a restart. When a new game patch appears, the main window shows a banner and the tray shows a notification.
+- Patch page: official developer posts from Steam since the previous patch, a "My weapons" filter (weapons the overlay has recognized and their attachments), removed items, the game build number, and every change per item (previously cut at six).
+
 ### 1.1.1 — 2026-11-07
 
 - The game menu is recognized in both the English and the Russian game interface. Windows no longer needs the Russian language installed: without it, Russian labels are matched by letter shapes as read by the English OCR engine.
@@ -34,6 +39,11 @@
 ---
 
 ## Русский
+
+### Не выпущено
+
+- База сама обновляется с MetaForge при запуске (если не проверялась больше часа) и раз в 6 часов, без перезапуска. Когда выходит новый патч игры, в главном окне появляется баннер, а в трее — уведомление.
+- Раздел «Патч»: официальные записи разработчиков в Steam с прошлого патча, фильтр «Мои пушки» (пушки, которые узнавал оверлей, и обвесы к ним), удалённые предметы, номер сборки игры и все изменения предмета (раньше обрезалось до шести).
 
 ### 1.1.1 — 2026-11-07
 

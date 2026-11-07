@@ -41,10 +41,25 @@ sealed class Recognizer(OcrService ocr)
     GameData data = null!;
     IconMatcher icons = null!;
 
+    /// <summary>
+    /// База для распознавания. Меняется из окна (обновление базы), а читается фоновым потоком посреди
+    /// кадра — поэтому новая база с иконками встаёт на место одним шагом в начале следующего кадра.
+    /// </summary>
     public GameData Data
     {
-        get => data;
-        set { data = value; icons = new IconMatcher(value); }
+        get => pending?.Data ?? data;
+        set
+        {
+            var next = (value, new IconMatcher(value));
+            if (data == null) (data, icons) = next;
+            else pending = next;
+        }
+    }
+    volatile Tuple<GameData, IconMatcher>? pendingBox;
+    (GameData Data, IconMatcher Icons)? pending
+    {
+        get => pendingBox is { } b ? (b.Item1, b.Item2) : null;
+        set => pendingBox = value is { } v ? Tuple.Create(v.Data, v.Icons) : null;
     }
 
     static bool IsOrange(int r, int g, int b) => r > 200 && g > 105 && g < 195 && b < 90 && r - g > 45;
@@ -66,6 +81,7 @@ sealed class Recognizer(OcrService ocr)
 
     public Recognition Run(Frame raw)
     {
+        if (pendingBox is { } next) { (data, icons) = (next.Item1, next.Item2); pendingBox = null; }
         var rec = new Recognition { UiHeight = raw.H };
         if (!OrangeGate(raw)) { rec.Reason = "нет оранжевых элементов"; return rec; }
 

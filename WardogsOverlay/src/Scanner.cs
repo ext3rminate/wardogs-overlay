@@ -223,6 +223,11 @@ sealed class Scanner : IDisposable
             var roiScreen = rec.Roi.Offset(client.X, client.Y);
             track = new Track(client, roiScreen, frame.Crop(rec.Roi).Signature(), now + settings.FullRecheckMs);
             current = rec;
+            if (!settings.MyWeapons.Contains(rec.Weapon.Slug))
+            {
+                settings.MyWeapons.Add(rec.Weapon.Slug);
+                settings.Save();
+            }
             if (rec.Key != lastKey)
             {
                 lastKey = rec.Key;

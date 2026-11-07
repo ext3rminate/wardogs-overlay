@@ -162,6 +162,31 @@ static class TextUtil
         return digits.Length is > 0 and <= 6 ? int.Parse(digits) : null;
     }
 
+    /// <summary>
+    /// Текст анонса Steam (BBCode) → обычный текст: картинки и видео выкидываем, ссылки оставляем
+    /// подписью, пункты списков — с «• », заголовки — отдельной строкой.
+    /// </summary>
+    public static string CleanSteamText(string s)
+    {
+        const System.Text.RegularExpressions.RegexOptions o =
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Singleline;
+        static string R(string input, string pattern, string replacement, System.Text.RegularExpressions.RegexOptions options = default) =>
+            System.Text.RegularExpressions.Regex.Replace(input, pattern, replacement, options);
+        s = s.Replace("\r", "");
+        s = R(s, @"\[img[^\]]*\].*?\[/img\]", "", o);
+        s = R(s, @"\[(previewyoutube|video)[^\]]*\].*?\[/\1\]", "", o);
+        s = R(s, @"\{STEAM_CLAN_IMAGE\}\S*", "", o);
+        s = R(s, @"\[url=[^\]]*\](.*?)\[/url\]", "$1", o);
+        s = R(s, @"\[\*\]", "\n• ", o);
+        s = R(s, @"\[/?(h[1-6]|p|list|olist|tr|table|hr|quote)[^\]]*\]", "\n", o);
+        s = R(s, @"\[/?[a-z*]+(?:[= ][^\]]*)?\]", "", o);
+        s = R(s, @"<[^>]+>", "", o);
+        s = System.Net.WebUtility.HtmlDecode(s);
+        s = R(s, @"[ \t]+\n", "\n");
+        s = R(s, @"\n{3,}", "\n\n");
+        return s.Trim();
+    }
+
     /// <summary>Буквы, которые OCR путает с цифрами в суммах: О→0, З→3, б→6, В→8, l/I/|→1.</summary>
     public static string DigitLike(string s)
     {

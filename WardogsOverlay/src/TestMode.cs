@@ -221,6 +221,10 @@ static class TestMode
         Check("«ПП-19 «БИЗОН»» по начертанию = «nn-19 «6VI3OH»»", TextUtil.Shape("ПП-19 «БИЗОН»") == TextUtil.Shape("nn-19 «6VI3OH»"),
               $"{TextUtil.Shape("ПП-19 «БИЗОН»")} / {TextUtil.Shape("nn-19 «6VI3OH»")}");
 
+        var clean = TextUtil.CleanSteamText("[h2]Patch[/h2][list][*]One[*]Two[/list][img]{STEAM_CLAN_IMAGE}/a.png[/img]" +
+                                            "[dynamiclink href=\"https://x\"][/dynamiclink][url=https://y]link[/url] &amp; done");
+        Check("текст анонса Steam очищен от разметки", !clean.Contains('[') && clean.Contains("• One") && clean.Contains("link & done"), clean.Replace("\n", " / "));
+
         // Экономика: стрельбище $10 000 → продавец $324 935 → $376 326 (реальная сессия 29.10).
         var s = new EconomySession();
         var t0 = DateTime.Now;

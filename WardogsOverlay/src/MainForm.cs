@@ -32,7 +32,8 @@ sealed class MainForm : Form
     bool checkingUpdate, installing, updateChecked;
     string? autoFailed;
     readonly System.Windows.Forms.Timer updTimer = new() { Interval = 60_000 };
-    long nextUpdateCheck;
+    long nextUpdateCheck, nextDataCheck;
+    bool refreshingData, patchBannerShown;
     Label lblSearchVal = null!, lblGameVal = null!, lblPlaqueVal = null!, lblMoneyVal = null!, lblBase = null!, lblScaleVal = null!, lblOpacityVal = null!;
     PaintBox gameDot = null!;
     Slider slScale = null!, slOpacity = null!;
@@ -74,10 +75,26 @@ sealed class MainForm : Form
         menu.Items.AddRange([miOpen, miDb, miToggle, new ToolStripSeparator(), miExit]);
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => ShowFromTray();
-        tray.BalloonTipClicked += (_, _) => { if (update != null) ShowFromTray(); };
+        tray.BalloonTipClicked += (_, _) =>
+        {
+            if (recognizer?.Data is { } d && d.PatchBuild.Length > 0 && settings.SeenPatchBuild != d.PatchBuild)
+            {
+                settings.SeenPatchBuild = d.PatchBuild;
+                settings.Save();
+                Rebuild();
+                OpenDatabase(DatabaseForm.PageKeys.Count - 1);
+            }
+            else if (update != null) ShowFromTray();
+        };
         ApplyTexts();
 
-        settings.Changed += () => { if (IsHandleCreated) BeginInvoke(LoadSettingsToUi); };
+        settings.Changed += () =>
+        {
+            if (!IsHandleCreated) return;
+            // Патч посмотрели в окне базы — убираем баннер «Вышел патч».
+            if (patchBannerShown && settings.SeenPatchBuild == recognizer?.Data.PatchBuild) BeginInvoke(Rebuild);
+            else BeginInvoke(LoadSettingsToUi);
+        };
         DpiChanged += (_, _) => BeginInvoke(Rebuild);
     }
 
@@ -138,6 +155,8 @@ sealed class MainForm : Form
         head.Controls.Add(logo, 0, 0); head.Controls.Add(titles, 1, 0); head.Controls.Add(segLang, 2, 0);
         col.Controls.Add(head);
         if (update != null && settings.SkippedUpdate != update.Tag) col.Controls.Add(UpdateBanner(inner));
+        patchBannerShown = recognizer?.Data is { PatchBuild.Length: > 0 } pd && settings.SeenPatchBuild != null && settings.SeenPatchBuild != pd.PatchBuild;
+        if (patchBannerShown) col.Controls.Add(PatchBanner(inner, recognizer!.Data));
 
         // --- плитки состояния
         var tiles = new TableLayoutPanel { ColumnCount = 2, RowCount = 2, Width = inner, Height = Sc(82) * 2 + Sc(10), Margin = new Padding(0, 0, 0, Sc(14)), BackColor = Theme.Bg };
@@ -348,7 +367,7 @@ sealed class MainForm : Form
             l.LinkClicked += (_, _) => a();
             return l;
         }
-        lnkUpdate = Link(L.T("Обновить базу", "Update data"), async () => await UpdateDatabase());
+        lnkUpdate = Link(L.T("Обновить базу", "Update data"), async () => await RefreshData(manual: true));
         links.Controls.AddRange([lnkUpdate, Link(L.T("Журнал", "Log"), ShowLog),
             Link(L.T("Папка", "Folder"), () => Process.Start("explorer.exe", AppContext.BaseDirectory))]);
         foot.Controls.Add(links, 1, 0);
@@ -425,14 +444,18 @@ sealed class MainForm : Form
         ResumeLayout(true);
     }
 
-    void OpenDatabase()
+    void OpenDatabase() => OpenDatabase(null);
+
+    void OpenDatabase(int? page)
     {
         if (recognizer == null) return;
         if (dbForm == null || dbForm.IsDisposed)
         {
-            dbForm = new DatabaseForm(recognizer.Data, economy);
+            dbForm = new DatabaseForm(recognizer.Data, economy, settings);
+            if (page is int pg) dbForm.SelectPage(pg);
             dbForm.Show();
         }
+        else if (page is int pg) dbForm.SelectPage(pg);
         else
         {
             if (dbForm.WindowState == FormWindowState.Minimized) dbForm.WindowState = FormWindowState.Normal;
@@ -540,6 +563,12 @@ sealed class MainForm : Form
             }
             var ocr = new OcrService();
             recognizer = new Recognizer(ocr) { Data = data };
+            if (settings.SeenPatchBuild == null && data.PatchBuild.Length > 0)
+            {
+                // Первый запуск: текущий патч не «новый», баннер покажем со следующего.
+                settings.SeenPatchBuild = data.PatchBuild;
+                settings.Save();
+            }
         }
         catch (Exception ex)
         {
@@ -562,11 +591,114 @@ sealed class MainForm : Form
         // Обновления: при запуске и потом раз в 6 часов; автоустановка ждёт, пока игра уйдёт с переднего плана.
         updTimer.Tick += async (_, _) =>
         {
+            if (Environment.TickCount64 >= nextDataCheck) await RefreshData(manual: false);
             if (Environment.TickCount64 >= nextUpdateCheck) await CheckForUpdate(manual: false);
             else MaybeAutoInstall();
         };
         updTimer.Start();
+        if (settings.SeenPatchBuild != recognizer.Data.PatchBuild) Rebuild(); // патч вышел, пока программа была закрыта
+        // База: при запуске, если давно не сверяли (> 1 ч), и потом раз в 6 часов.
+        if (DateTime.UtcNow - GameData.LastCheck > TimeSpan.FromHours(1)) await RefreshData(manual: false);
+        else nextDataCheck = Environment.TickCount64 + 6 * 3600_000L;
         await CheckForUpdate(manual: false);
+    }
+
+    // ---------- обновление базы ----------
+
+    /// <summary>
+    /// Сверить базу с MetaForge и, если там новее, подменить её на ходу (без перезапуска).
+    /// Вышел новый патч игры — баннер в окне и уведомление в трее.
+    /// </summary>
+    async Task RefreshData(bool manual)
+    {
+        if (refreshingData || recognizer == null) return;
+        refreshingData = true;
+        nextDataCheck = Environment.TickCount64 + 6 * 3600_000L;
+        lnkUpdate.Enabled = false;
+        var old = recognizer.Data;
+        try
+        {
+            void Report(string s) { if (manual && IsHandleCreated) BeginInvoke(() => lblBase.Text = s); }
+            bool changed = await Task.Run(() => GameData.DownloadAsync(Report));
+            if (changed)
+            {
+                var fresh = await Task.Run(GameData.Load);
+                recognizer.Data = fresh;
+                Log.Info($"База обновлена: {fresh.Version}, патч {fresh.PatchBuild}");
+                scanner?.Refresh();
+                if (dbForm is { IsDisposed: false })
+                {
+                    // Окно базы держит старые данные — открываем заново на той же странице.
+                    var page = dbForm.CurrentPage;
+                    dbForm.Close();
+                    OpenDatabase(page);
+                }
+                if (fresh.PatchBuild.Length > 0 && fresh.PatchBuild != old.PatchBuild)
+                {
+                    Log.Info($"Новый патч игры: {fresh.PatchTitle} ({fresh.PatchBuild})");
+                    Rebuild();
+                    tray.ShowBalloonTip(6000, L.T($"Вышел патч: {fresh.PatchTitle}", $"New game patch: {fresh.PatchTitle}"),
+                        PatchSummary(fresh) + L.T(" База уже обновлена — нажми, чтобы посмотреть.", " Data is already updated — click to see."), ToolTipIcon.Info);
+                }
+            }
+            else if (manual) lblBase.Text = L.T("База актуальна — на metaforge.app ничего нового.", "Data is up to date — nothing new on metaforge.app.");
+        }
+        catch (Exception ex)
+        {
+            Log.Info("Обновление базы не удалось: " + ex.Message);
+            if (manual)
+                MessageBox.Show(this, L.T("Не получилось обновить базу: ", "Could not update data: ") + ex.Message, "Wardogs overlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            refreshingData = false;
+            lnkUpdate.Enabled = true;
+            if (!manual || lblBase.Text.StartsWith(L.T("Скачиваю", "Downloading"))) RefreshStatus();
+        }
+    }
+
+    static string PatchSummary(GameData d)
+    {
+        int added = d.Patch.Count(p => p.Added), changed = d.Patch.Count(p => !p.Added && !p.Removed), removed = d.Patch.Count(p => p.Removed);
+        var s = L.T($"{added} новых, {changed} изменено", $"{added} added, {changed} changed");
+        if (removed > 0) s += L.T($", {removed} удалено", $", {removed} removed");
+        return s + ".";
+    }
+
+    Card PatchBanner(int inner, GameData d)
+    {
+        var card = new Card { Width = inner, Height = Sc(100), Padding = new Padding(Sc(18), Sc(14), Sc(18), Sc(14)), Margin = new Padding(0, 0, 0, Sc(14)), Border = Theme.Good };
+        var body = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Panel, Margin = Padding.Empty, Dock = DockStyle.Top,
+        };
+        card.Controls.Add(body);
+        body.SizeChanged += (_, _) => card.Height = body.Height + card.Padding.Vertical;
+        body.Controls.Add(Lbl(L.T($"Вышел патч: {d.PatchTitle}", $"New game patch: {d.PatchTitle}"), 16, 700, Theme.Good));
+        var info = Lbl($"{d.PatchDate} · {PatchSummary(d)} " + L.T("База уже обновлена — цифры на плашке актуальны.", "Data is already updated — panel numbers are current."), 13, 400, Theme.Muted);
+        info.MaximumSize = new Size(inner - Sc(36), 0);
+        info.Margin = new Padding(0, Sc(6), 0, Sc(10));
+        body.Controls.Add(info);
+        var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Panel, Margin = Padding.Empty };
+        void Seen()
+        {
+            settings.SeenPatchBuild = d.PatchBuild;
+            settings.Save();
+            Rebuild();
+        }
+        UiButton Btn(string text, ButtonKind kind, Action click)
+        {
+            var b = new UiButton { Kind = kind, Text = text, Height = Sc(40), Font = Theme.UiFont(13, 600), Margin = new Padding(0, 0, Sc(8), 0) };
+            b.Width = b.PreferredWidth(DeviceDpi);
+            b.Click += (_, _) => click();
+            buttons.Controls.Add(b);
+            return b;
+        }
+        Btn(L.T("Что изменилось", "What changed"), ButtonKind.Primary, () => { Seen(); OpenDatabase(DatabaseForm.PageKeys.Count - 1); });
+        Btn(L.T("Скрыть", "Dismiss"), ButtonKind.Ghost, Seen);
+        body.Controls.Add(buttons);
+        return card;
     }
 
     // ---------- обновление программы ----------
@@ -749,31 +881,6 @@ sealed class MainForm : Form
             lblBase.Text = L.T($"База MetaForge от {recognizer.Data.Version} · {recognizer.Data.Weapons.Count} пушек · {recognizer.Data.Attachments.Count} обвесов",
                                $"MetaForge data {recognizer.Data.Version} · {recognizer.Data.Weapons.Count} weapons · {recognizer.Data.Attachments.Count} attachments");
         tray.Text = s == null ? "Wardogs overlay" : $"Wardogs — {(s.Enabled ? s.PlaqueStatus : L.T("поиск выключен", "search off"))}".Truncate(63);
-    }
-
-    async Task UpdateDatabase()
-    {
-        lnkUpdate.Enabled = false;
-        try
-        {
-            await Task.Run(() => GameData.DownloadAsync(s => BeginInvoke(() => lblBase.Text = s)));
-            if (recognizer != null)
-            {
-                recognizer.Data = GameData.Load();
-                Log.Info($"База обновлена: {recognizer.Data.Version}");
-                scanner?.Refresh();
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info("Обновление базы не удалось: " + ex.Message);
-            MessageBox.Show(this, L.T("Не получилось обновить базу: ", "Could not update data: ") + ex.Message, "Wardogs overlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-        }
-        finally
-        {
-            lnkUpdate.Enabled = true;
-            RefreshStatus();
-        }
     }
 
     void ShowLog()

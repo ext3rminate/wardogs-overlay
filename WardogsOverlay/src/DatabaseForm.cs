@@ -30,10 +30,11 @@ sealed class DatabaseForm : Form
         foreach (var c in old) c.Dispose();
     }
 
-    public DatabaseForm(GameData data, Economy economy, string? startTab = null)
+    public DatabaseForm(GameData data, Economy economy, Settings? settings = null, string? startTab = null)
     {
         this.data = data;
         this.economy = economy;
+        this.settings = settings;
         Theme.Load();
         Text = L.T("Wardogs — база и инструменты", "Wardogs — database & tools");
         Icon = AppIcon.Get();
@@ -95,6 +96,8 @@ sealed class DatabaseForm : Form
 
     /// <summary>Открыть страницу по номеру (для проверки).</summary>
     public void SelectPage(int i) => rail.SelectedIndex = i;
+    public int CurrentPage => rail.SelectedIndex;
+    readonly Settings? settings;
     public static IReadOnlyList<string> PageKeys => Keys;
 
     void OnEconomy() { if (IsHandleCreated && !IsDisposed) BeginInvoke(() => economyRefresh?.Invoke()); }
@@ -1005,7 +1008,14 @@ sealed class DatabaseForm : Form
         var page = Page();
         // Фильтр по названию раздела: разные разделы базы («other», «keycards»…) могут называться одинаково.
         var tabsList = data.Patch.Select(p => L.TabName(p.Tab)).Distinct().OrderBy(t => t).ToList();
-        var chips = new ChipBar { Dock = DockStyle.Top, Items = tabsList.Prepend(L.T("Все", "All")).ToArray() };
+        // «Мои пушки» — то, что оверлей узнавал в меню: сами пушки и обвесы, которые к ним подходят.
+        var mine = settings?.MyWeapons.ToHashSet() ?? [];
+        var myIds = data.Weapons.Where(w => mine.Contains(w.Slug)).Select(w => w.Id)
+            .Concat(data.Attachments.Values.Where(a => a.Fits?.Any(mine.Contains) == true).Select(a => a.Id)).ToHashSet();
+        int fixedChips = mine.Count > 0 ? 2 : 1;
+        var chipItems = new List<string> { L.T("Все", "All") };
+        if (mine.Count > 0) chipItems.Add(L.T("Мои пушки", "My weapons"));
+        var chips = new ChipBar { Dock = DockStyle.Top, Items = chipItems.Concat(tabsList).ToArray() };
         var search = new TextField(searchIcon: true, placeholder: L.T("Найти предмет…", "Find an item…")) { Width = Sc(240), Height = Sc(42), Fill = Theme.Panel };
         var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Bg, WrapContents = true };
         Theme.DarkScrollbars(flow);
@@ -1037,16 +1047,21 @@ sealed class DatabaseForm : Form
             flow.SuspendLayout();
             ClearControls(flow);
             int w = CardWidth();
-            // Сначала то, что поменялось у знакомых предметов, потом новинки.
-            foreach (var p in data.Patch.OrderBy(p => p.Added && p.Changes.Count == 0 ? 1 : 0))
+            // Сверху — официальные заметки разработчиков к этому патчу (что не видно по данным: механики, исправления).
+            if (chips.SelectedIndex == 0 && search.Box.Text.Trim().Length == 0)
+                foreach (var post in PatchNews()) flow.Controls.Add(NewsCard(post, flow.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - Sc(14)));
+            // Сначала то, что поменялось у знакомых предметов, потом удалённое и новинки.
+            foreach (var p in data.Patch.OrderBy(p => p.Removed ? 1 : p.Added && p.Changes.Count == 0 ? 2 : 0))
             {
-                if (chips.SelectedIndex > 0 && L.TabName(p.Tab) != tabsList[chips.SelectedIndex - 1]) continue;
+                if (chips.SelectedIndex == 1 && mine.Count > 0 && !myIds.Contains(p.Id)) continue;
+                if (chips.SelectedIndex >= fixedChips && L.TabName(p.Tab) != tabsList[chips.SelectedIndex - fixedChips]) continue;
                 var nm = NameOf(p);
                 if (!Match(search.Box.Text, p.Name, nm)) continue;
-                var changes = p.Changes.Where(c => !c.Path.SequenceEqual(["description"]) && !c.Path.SequenceEqual(["flavor"])).Take(6).ToList();
-                if (!p.Added && changes.Count == 0) continue;
+                // Все изменения, без обрезки: у некоторых предметов их два десятка.
+                var changes = p.Changes.Where(c => !c.Path.SequenceEqual(["description"]) && !c.Path.SequenceEqual(["flavor"])).ToList();
+                if (!p.Added && !p.Removed && changes.Count == 0) continue;
                 var item = p;
-                var card = new PaintBox { Width = w, Height = Sc(58 + 32 * Math.Max(changes.Count, p.Added ? 0 : 1)), Margin = new Padding(0, 0, Sc(12), Sc(12)) };
+                var card = new PaintBox { Width = w, Height = Sc(58 + 32 * Math.Max(changes.Count, p.Added || p.Removed ? 0 : 1)), Margin = new Padding(0, 0, Sc(12), Sc(12)) };
                 card.Painter = (g, b) =>
                 {
                     g.Clear(Theme.Bg);
@@ -1055,12 +1070,14 @@ sealed class DatabaseForm : Form
                     Theme.StrokeRound(g, Theme.Line, r, b.S(14));
                     float x = b.S(16), cw = b.Width - b.S(32), y = b.S(14);
                     float right = x + cw;
-                    if (item.Added)
+                    if (item.Added || item.Removed)
                     {
-                        var nr = new RectangleF(right - b.S(58), y + b.S(2), b.S(58), b.S(20));
-                        Theme.FillRound(g, Theme.Accent, nr, b.S(6));
-                        Theme.Draw(g, L.T("НОВОЕ", "NEW"), newF, Theme.AccentInk, nr, Theme.Align.Center);
-                        right -= b.S(66);
+                        var badge = item.Added ? L.T("НОВОЕ", "NEW") : L.T("УДАЛЕНО", "REMOVED");
+                        float bw = Math.Max(b.S(58), Theme.Measure(g, badge, newF).Width + b.S(14));
+                        var nr = new RectangleF(right - bw, y + b.S(2), bw, b.S(20));
+                        Theme.FillRound(g, item.Added ? Theme.Accent : Theme.BadText, nr, b.S(6));
+                        Theme.Draw(g, badge, newF, item.Added ? Theme.AccentInk : Theme.Bg, nr, Theme.Align.Center);
+                        right -= bw + b.S(8);
                     }
                     var tab = L.TabName(item.Tab);
                     float tw = Theme.Measure(g, tab, tagF).Width + b.S(16);
@@ -1091,7 +1108,8 @@ sealed class DatabaseForm : Form
         flow.SizeChanged += (_, _) =>
         {
             int w = CardWidth();
-            foreach (Control c in flow.Controls) c.Width = w;
+            foreach (Control c in flow.Controls)
+                c.Width = c is Card ? flow.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - Sc(14) : w;
         };
 
         var counters = new PaintBox { Size = new Size(Sc(230), Sc(54)) };
@@ -1099,7 +1117,7 @@ sealed class DatabaseForm : Form
         counters.Painter = (g, b) =>
         {
             g.Clear(Theme.Bg);
-            var vals = new[] { (data.Patch.Count(p => p.Added), L.T("новых", "added")), (data.Patch.Count(p => !p.Added), L.T("изменено", "changed")) };
+            var vals = new[] { (data.Patch.Count(p => p.Added), L.T("новых", "added")), (data.Patch.Count(p => !p.Added && !p.Removed), L.T("изменено", "changed")) };
             for (int i = 0; i < 2; i++)
             {
                 var r = new RectangleF(i * b.S(118), 0, b.S(110), b.Height);
@@ -1116,9 +1134,59 @@ sealed class DatabaseForm : Form
         page.Controls.Add(Gap(14));
         var sub = data.Patch.Count == 0
             ? L.T("Журнал патчей ещё не скачан — «Обновить базу» в главном окне", "Patch log not downloaded yet — «Update data» in the main window")
-            : $"{data.PatchTitle} · {data.PatchDate} · " + L.T("зелёным — выгоднее для тебя, красным — хуже", "green — better for you, red — worse");
+            : $"{data.PatchTitle} · {data.PatchDate}" + (data.PatchBuild.Length > 0 ? $" · {data.PatchBuild}" : "") +
+              (data.Patch.Any(p => p.Removed) ? L.T($" · удалено: {data.Patch.Count(p => p.Removed)}", $" · removed: {data.Patch.Count(p => p.Removed)}") : "") +
+              " · " + L.T("зелёным — выгоднее для тебя, красным — хуже", "green — better for you, red — worse");
         page.Controls.Add(Header(L.T("Патч", "Patch"), sub, search, counters));
         page.HandleCreated += (_, _) => BeginInvoke(Fill);
+        // Открыли «Патч» — значит, новый патч увидели: баннер в главном окне больше не нужен.
+        if (settings != null && data.PatchBuild.Length > 0 && settings.SeenPatchBuild != data.PatchBuild)
+        {
+            settings.SeenPatchBuild = data.PatchBuild;
+            settings.NotifyChanged();
+        }
         return page;
+    }
+
+    /// <summary>Записи разработчиков в Steam с выхода прошлого патча (не больше трёх), иначе последняя.</summary>
+    IEnumerable<NewsPost> PatchNews()
+    {
+        if (data.News.Count == 0) return [];
+        var since = DateTime.TryParse(data.PatchPreviousDate, System.Globalization.CultureInfo.InvariantCulture,
+                                      System.Globalization.DateTimeStyles.None, out var d) ? d : DateTime.MinValue;
+        var recent = data.News.Where(n => n.Date >= since).Take(3).ToList();
+        return recent.Count > 0 ? recent : data.News.Take(1);
+    }
+
+    Card NewsCard(NewsPost post, int width)
+    {
+        var card = new Card { Width = Math.Max(Sc(380), width), Height = Sc(100), Padding = new Padding(Sc(18), Sc(14), Sc(18), Sc(14)), Margin = new Padding(0, 0, Sc(12), Sc(12)) };
+        var body = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = Theme.Panel, Margin = Padding.Empty, Dock = DockStyle.Top,
+        };
+        card.Controls.Add(body);
+        body.SizeChanged += (_, _) => card.Height = body.Height + card.Padding.Vertical;
+        Label L1(string text, float px, int weight, Color color) => new()
+        {
+            Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = color, Font = Theme.UiFont(px, weight),
+            Margin = new Padding(0, 0, 0, Sc(6)), MaximumSize = new Size(card.Width - Sc(36), 0),
+        };
+        body.Controls.Add(L1(L.T("ОФИЦИАЛЬНО · STEAM · ", "OFFICIAL · STEAM · ") + post.Date.ToString("d MMMM yyyy", L.Ru ? System.Globalization.CultureInfo.GetCultureInfo("ru-RU") : System.Globalization.CultureInfo.InvariantCulture).ToUpperInvariant(),
+                             11, 600, Theme.Faint));
+        body.Controls.Add(L1(post.Title, 16, 700, Theme.Text));
+        // Анонсы бывают огромными — показываем начало, целиком — в Steam.
+        var text = post.Text.Length > 1400 ? post.Text[..1400].TrimEnd() + "…" : post.Text;
+        if (text.Length > 0) body.Controls.Add(L1(text, 13, 400, Theme.Muted));
+        var link = new LinkLabel
+        {
+            Text = L.T("Читать целиком в Steam", "Read in full on Steam"), AutoSize = true, LinkColor = Theme.Accent, ActiveLinkColor = Theme.Accent,
+            VisitedLinkColor = Theme.Accent, LinkBehavior = LinkBehavior.HoverUnderline, Font = Theme.UiFont(12, 500), BackColor = Color.Transparent,
+            Margin = new Padding(0, Sc(2), 0, 0),
+        };
+        link.LinkClicked += (_, _) => { if (post.Url.StartsWith("https://")) System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(post.Url) { UseShellExecute = true }); };
+        body.Controls.Add(link);
+        return card;
     }
 }
