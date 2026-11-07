@@ -7,6 +7,9 @@
 - Game data refreshes automatically from MetaForge at startup (if not checked within an hour) and every 6 hours, and is swapped in without a restart. When a new game patch appears, the main window shows a banner and the tray shows a notification.
 - New "Combat: damage & TTK" page: shots and time to kill by hit zone, body armour, helmet, distance and ammo type (FMJ/HP/AP), with damage per hit, magazine cost, ammo unlock and a recommendation on which ammo to buy. The model matches MetaForge's calculator, including range falloff and bullet travel time.
 - The panel shows shots to kill against the chosen enemy armour and distance (chest, head, best ammo), and the life cost — the build plus your armour and helmet — with how many rebuys your balance covers (red below three). Both are set on the main window.
+- Economy page: "Where the money went" — purchases detected from vendor balance drops within one visit and attributed to the weapon or attachments that appeared (otherwise ammo, armour or gear), with totals by kind; "Goal" — pick any item with an unlock cost to see how much is missing and how long to play at your average rate, plus the role level it needs.
+- The life-cost line on the panel shows payback time: minutes of play at your average income to earn the build back.
+- Fixed empty space under page headers in the database window.
 - Shotgun and time-to-kill estimates across the app now use the same armour model (per-tier reduction, ammo penetration and armour rules).
 - Patch page: official developer posts from Steam since the previous patch, a "My weapons" filter (weapons the overlay has recognized and their attachments), removed items, the game build number, and every change per item (previously cut at six).
 
@@ -48,6 +51,9 @@
 - База сама обновляется с MetaForge при запуске (если не проверялась больше часа) и раз в 6 часов, без перезапуска. Когда выходит новый патч игры, в главном окне появляется баннер, а в трее — уведомление.
 - Новая страница «Бой: урон и TTK»: выстрелы и время до убийства по зоне, бронежилету, шлему, дистанции и типу патронов (FMJ/HP/AP), урон за попадание, цена магазина, открытие патронов и совет, какие патроны брать. Модель совпадает с калькулятором MetaForge, включая падение урона с дистанцией и полёт пули.
 - На плашке — выстрелы до убийства против выбранной брони и дистанции (грудь, голова, лучший патрон) и цена жизни: сборка с твоей бронёй и шлемом и сколько раз её можно купить на текущий баланс (красным — меньше трёх). Настраивается в главном окне.
+- Страница «Экономика»: «Куда ушли деньги» — покупки по падению баланса в одном заходе к продавцу с привязкой к появившейся пушке или обвесам (иначе — патроны, броня или снаряжение) и суммы по видам; «Цель» — выбираешь предмет с ценой открытия и видишь, сколько не хватает, сколько играть при твоём среднем темпе и какой нужен уровень роли.
+- В строке цены жизни на плашке — окупаемость: за сколько минут игры при твоём среднем заработке сборка отбивается.
+- Исправлено пустое место под заголовками страниц в окне базы.
 - Оценки времени убийства по всей программе (включая дробовики) считаются по одной модели брони: снижение по уровню, пробитие патрона и правила против брони.
 - Раздел «Патч»: официальные записи разработчиков в Steam с прошлого патча, фильтр «Мои пушки» (пушки, которые узнавал оверлей, и обвесы к ним), удалённые предметы, номер сборки игры и все изменения предмета (раньше обрезалось до шести).
 

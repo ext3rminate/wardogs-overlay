@@ -39,6 +39,8 @@ sealed class Settings
     /// <summary>Цена жизни (что теряешь при смерти без реанимации) и запас жизней по балансу.</summary>
     public bool ShowLifeCost { get; set; } = true;
     public int MyArmour { get; set; } = 2;
+    /// <summary>Цель для накопления (предмет, который хочется открыть) — slug из базы.</summary>
+    public string? GoalSlug { get; set; }
     /// <summary>Ставить новые версии с GitHub самому (когда игра не на переднем плане). Выключено — только предлагать.</summary>
     public bool AutoUpdate { get; set; } = true;
     /// <summary>Версия, которую попросили не предлагать («Пропустить»).</summary>

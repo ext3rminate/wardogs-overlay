@@ -307,9 +307,14 @@ static class TestMode
         var t = DateTime.Now.AddMinutes(-40);
         foreach (var (min, bal) in new[] { (0, 10000), (6, 13200), (9, 9800), (17, 15400), (25, 21000), (28, 16500), (40, 24800) })
             s.Points.Add(new MoneyPoint(t.AddMinutes(min), bal));
+        s.Purchases.Add(new Purchase(t.AddMinutes(9), 3400, "AK-74", "weapon"));
+        s.Purchases.Add(new Purchase(t.AddMinutes(28), 820, L.T("Вертикальная передняя рукоятка TDG", "TDG Vertical Foregrip"), "attachments"));
+        s.Purchases.Add(new Purchase(t.AddMinutes(28), 1260, L.T("Глушитель PBS-4", "PBS-4 Suppressor"), "attachments"));
+        s.Purchases.Add(new Purchase(t.AddMinutes(29), 600, L.T("патроны, броня или снаряжение", "ammo, armour or gear"), "other"));
+        var testSettings = new Settings { GoalSlug = data.Items.FirstOrDefault(i => i.Unlock is { Cash: > 100_000 })?.Slug };
 
         Ui.Theme.Load();
-        using var form = new DatabaseForm(data, eco) { StartPosition = FormStartPosition.Manual, Location = new Point(-5000, -5000), ShowInTaskbar = false };
+        using var form = new DatabaseForm(data, eco, testSettings) { StartPosition = FormStartPosition.Manual, Location = new Point(-5000, -5000), ShowInTaskbar = false };
         form.Show();
         for (int i = 0; i < DatabaseForm.PageKeys.Count; i++)
         {

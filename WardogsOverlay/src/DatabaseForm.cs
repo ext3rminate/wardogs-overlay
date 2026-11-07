@@ -142,10 +142,27 @@ sealed class DatabaseForm : Form
         t.SizeChanged += (_, _) => sub.MaximumSize = new Size(Math.Max(1, t.ClientSize.Width - Sc(4)), 0);
         if (right.Length > 0)
         {
-            var r = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, Sc(12), 0, 0) };
+            // GrowAndShrink: иначе высота, посчитанная при узком окне (кнопки в столбик), так и остаётся пустым местом.
+            var r = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, Sc(12), 0, 0) };
             foreach (var c in right) { c.Margin = new Padding(0, 0, Sc(10), Sc(4)); r.Controls.Add(c); }
             t.Controls.Add(r);
         }
+        // Высоту считаем сами по ширине страницы: автоматическая запоминает высоту, посчитанную
+        // ещё до раскладки (подзаголовок в столбик), и под шапкой остаётся пустое место.
+        t.ParentChanged += (_, _) =>
+        {
+            if (t.Parent is not Control parent) return;
+            void Fit()
+            {
+                int w = parent.ClientSize.Width - parent.Padding.Horizontal;
+                if (w <= 0) return;
+                sub.MaximumSize = new Size(Math.Max(1, w - Sc(4)), 0);
+                t.AutoSize = false;
+                t.Height = t.GetPreferredSize(new Size(w, 0)).Height;
+            }
+            parent.SizeChanged += (_, _) => Fit();
+            Fit();
+        };
         return t;
     }
 
@@ -916,7 +933,7 @@ sealed class DatabaseForm : Form
             tileBoxes.Add(t);
         }
 
-        var chart = new PaintBox { Dock = DockStyle.Top, Height = Sc(300) };
+        var chart = new PaintBox { Dock = DockStyle.Top, Height = Sc(180) };
         var axisF = Theme.MonoFont(11); var titleF = Theme.UiFont(13, 600); var hintF = Theme.UiFont(12);
         chart.Painter = (g, b) =>
         {
@@ -970,10 +987,148 @@ sealed class DatabaseForm : Form
         grid.AddCol(L.T("Итог", "Net"), 1f); grid.AddCol(L.T("В минуту", "Per min"), 0.8f);
         grid.Columns[1].DefaultCellStyle.ForeColor = grid.Columns[3].DefaultCellStyle.ForeColor = Theme.Muted;
 
+        // --- «Куда ушли деньги» и «Цель»
+        var mid = new TableLayoutPanel { Dock = DockStyle.Top, ColumnCount = 2, Height = Sc(236), BackColor = Theme.Bg };
+        mid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        mid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+        var spentBox = new PaintBox { Dock = DockStyle.Fill, Margin = new Padding(0, 0, Sc(7), 0) };
+        var rowF = Theme.UiFont(13); var monoF = Theme.MonoFont(13, 600); var bigF = Theme.MonoFont(20, 600);
+        spentBox.Painter = (g, b) =>
+        {
+            g.Clear(Theme.Bg);
+            var r = new RectangleF(0, 0, b.Width, b.Height);
+            Theme.FillRound(g, Theme.Panel, r, b.S(16));
+            Theme.StrokeRound(g, Theme.Line, r, b.S(16));
+            float x = b.S(18), w = b.Width - b.S(36), y = b.S(16);
+            Theme.Draw(g, L.T("КУДА УШЛИ ДЕНЬГИ · СЕССИЯ", "WHERE THE MONEY WENT · SESSION"), titleF, Theme.Muted, new RectangleF(x, y, w, b.S(20)));
+            y += b.S(30);
+            var list = economy.Current.Purchases.ToList();
+            if (list.Count == 0)
+            {
+                Theme.Draw(g, L.T("Покупки появятся здесь: оверлей видит, как падает баланс у продавца, и что в этот момент появилось в сборке.",
+                                  "Purchases show up here: the overlay sees the vendor balance drop and what appeared in the build at that moment."),
+                           hintF, Theme.Faint, new RectangleF(x, y, w, b.Height - y - b.S(12)));
+                return;
+            }
+            var kinds = new[] { ("attachments", L.T("обвесы", "attachments")), ("weapon", L.T("пушки", "weapons")), ("other", L.T("прочее", "other")) };
+            float cx = x;
+            foreach (var (k, label) in kinds)
+            {
+                int sum = list.Where(p => p.Kind == k).Sum(p => p.Amount);
+                Theme.Draw(g, L.Money(sum), bigF, sum > 0 ? Theme.Text : Theme.Faint, new RectangleF(cx, y, w / 3, b.S(28)));
+                Theme.Draw(g, label, hintF, Theme.Faint, new RectangleF(cx, y + b.S(28), w / 3, b.S(18)));
+                cx += w / 3;
+            }
+            y += b.S(56);
+            foreach (var p in list.AsEnumerable().Reverse().Take(5))
+            {
+                using (var pen = new Pen(Theme.LineSoft)) g.DrawLine(pen, x, y, x + w, y);
+                Theme.Draw(g, $"{p.Time:HH:mm}", axisF, Theme.Faint, new RectangleF(x, y + b.S(6), b.S(50), b.S(20)));
+                Theme.Draw(g, "−" + L.Money(p.Amount), monoF, Theme.BadText, new RectangleF(x + b.S(52), y + b.S(5), b.S(100), b.S(20)));
+                Theme.Draw(g, p.What, rowF, Theme.TextSoft, new RectangleF(x + b.S(150), y + b.S(5), w - b.S(150), b.S(20)));
+                y += b.S(26);
+            }
+        };
+
+        // Цель: что хочется открыть и сколько ещё играть при твоём темпе.
+        var goals = data.Items.Where(i => i.Unlock is { Cash: > 0 }).OrderBy(i => i.Tab).ThenBy(i => i.Unlock!.Cash).ToList();
+        DbItem? goal = goals.FirstOrDefault(i => i.Slug == settings?.GoalSlug);
+        var goalPanel = new Panel { Dock = DockStyle.Fill, Margin = new Padding(Sc(7), 0, 0, 0), BackColor = Theme.Bg };
+        var goalBox = new PaintBox { Dock = DockStyle.Fill };
+        var goalPick = new UiButton { Kind = ButtonKind.Secondary, Height = Sc(36), Font = Theme.UiFont(13, 500), Anchor = AnchorStyles.Top | AnchorStyles.Right };
+        void UpdateGoalPick()
+        {
+            goalPick.Text = (goal == null ? L.T("Выбрать цель", "Pick a goal") : L.T("Сменить", "Change")) + "  ▾";
+            goalPick.Width = goalPick.PreferredWidth(DeviceDpi);
+            goalPick.Location = new Point(goalPanel.Width - goalPick.Width - Sc(16), Sc(12));
+        }
+        goalPanel.SizeChanged += (_, _) => UpdateGoalPick();
+        goalPick.Click += (_, _) =>
+        {
+            var m = DarkMenu.Create();
+            foreach (var tab in goals.GroupBy(i => i.Tab))
+            {
+                var sub = new ToolStripMenuItem(L.TabName(tab.Key));
+                foreach (var it in tab)
+                {
+                    var item = it;
+                    sub.DropDownItems.Add($"{L.Name(item)} — {L.Money(item.Unlock!.Cash)}", null, (_, _) =>
+                    {
+                        goal = item;
+                        if (settings != null) { settings.GoalSlug = item.Slug; settings.NotifyChanged(); }
+                        UpdateGoalPick();
+                        goalBox.Invalidate();
+                    });
+                }
+                m.Items.Add(sub);
+            }
+            m.Show(goalPick, new Point(0, goalPick.Height + Sc(4)));
+        };
+        goalBox.Painter = (g, b) =>
+        {
+            g.Clear(Theme.Bg);
+            var r = new RectangleF(0, 0, b.Width, b.Height);
+            Theme.FillRound(g, Theme.Panel, r, b.S(16));
+            Theme.StrokeRound(g, Theme.Line, r, b.S(16));
+            float x = b.S(18), w = b.Width - b.S(36), y = b.S(16);
+            Theme.Draw(g, L.T("ЦЕЛЬ", "GOAL"), titleF, Theme.Muted, new RectangleF(x, y, w, b.S(20)));
+            y += b.S(34);
+            if (goal == null)
+            {
+                Theme.Draw(g, L.T("Выбери, что хочешь открыть (технику, пушку, обвес) — посчитаю, сколько не хватает и сколько ещё играть при твоём темпе.",
+                                  "Pick what you want to unlock (a vehicle, weapon or attachment) — I'll show how much is missing and how long to play at your rate."),
+                           hintF, Theme.Faint, new RectangleF(x, y, w, b.Height - y - b.S(12)));
+                return;
+            }
+            var u = goal.Unlock!;
+            int cost = u.Cash;
+            Theme.Draw(g, L.Name(goal), Theme.UiFont(16, 700), Theme.Text, new RectangleF(x, y, w, b.S(24)));
+            y += b.S(28);
+            Theme.Draw(g, L.T($"Открыть: {L.Money(cost)} · {L.Role(u.Role)} {u.Level} ур.", $"Unlock: {L.Money(cost)} · {L.Role(u.Role)} level {u.Level}") +
+                          (goal.Price is int pr and > 0 ? L.T($" · потом цена {L.Money(pr)}", $" · then {L.Money(pr)} each") : ""),
+                       hintF, Theme.Muted, new RectangleF(x, y, w, b.S(20)));
+            y += b.S(30);
+            int balance = economy.LastBalance ?? 0;
+            double frac = Math.Clamp(balance / (double)cost, 0, 1);
+            var bar = new RectangleF(x, y, w, b.S(10));
+            Theme.FillRound(g, Theme.Track, bar, b.S(5));
+            if (frac > 0) Theme.FillRound(g, frac >= 1 ? Theme.Good : Theme.Accent, new RectangleF(x, y, Math.Max(b.S(10), w * (float)frac), b.S(10)), b.S(5));
+            y += b.S(20);
+            // Строки рисуем по одной: перенос в этом рисовании не работает.
+            var lines = new List<(string Text, Color Color)>();
+            if (balance >= cost) lines.Add((L.T($"Денег хватает: баланс {L.Money(balance)}.", $"You have enough: balance {L.Money(balance)}."), Theme.Good));
+            else
+            {
+                int left = cost - balance;
+                lines.Add((L.T($"Баланс {L.Money(balance)} — не хватает {L.Money(left)}.", $"Balance {L.Money(balance)} — {L.Money(left)} to go."), Theme.TextSoft));
+                if (economy.AverageRate is double rate and > 0)
+                {
+                    var t = TimeSpan.FromMinutes(left / rate);
+                    string eta = t.TotalHours >= 1 ? L.T($"{(int)t.TotalHours} ч {t.Minutes} мин", $"{(int)t.TotalHours} h {t.Minutes} min") : L.T($"{Math.Max(1, t.Minutes)} мин", $"{Math.Max(1, t.Minutes)} min");
+                    lines.Add((L.T($"≈ {eta} игры при твоём темпе {L.Money((int)rate)}/мин (без трат).", $"≈ {eta} of play at your {L.Money((int)rate)}/min (no spending)."), Theme.Accent));
+                }
+                else lines.Add((L.T("Срок покажу, когда наберётся 10 минут истории заработка.", "Time estimate appears after 10 minutes of earnings history."), Theme.Faint));
+            }
+            lines.Add((L.T($"Ещё нужен уровень {u.Level} роли «{L.Role(u.Role)}».", $"Also needs {L.Role(u.Role)} level {u.Level}."), Theme.Faint));
+            foreach (var (text, color) in lines)
+            {
+                Theme.Draw(g, text, hintF, color, new RectangleF(x, y, w, b.S(20)));
+                y += b.S(24);
+            }
+        };
+        goalPanel.Controls.Add(goalPick);
+        goalPanel.Controls.Add(goalBox);
+        goalPick.BringToFront();
+        mid.Controls.Add(spentBox, 0, 0);
+        mid.Controls.Add(goalPanel, 1, 0);
+
         void Refresh()
         {
             foreach (var t in tileBoxes) t.Invalidate();
             chart.Invalidate();
+            spentBox.Invalidate();
+            goalBox.Invalidate();
+            UpdateGoalPick();
             grid.Rows.Clear();
             foreach (var h in economy.History)
                 grid.Rows.Add(new TwoLine(h.Start.ToString("dd.MM, HH:mm"), ""), $"{(int)h.Duration.TotalHours}:{h.Duration.Minutes:00}",
@@ -988,6 +1143,8 @@ sealed class DatabaseForm : Form
         newSession.Click += (_, _) => economy.NewSession();
 
         page.Controls.Add(GridCard(grid));
+        page.Controls.Add(Gap(14));
+        page.Controls.Add(mid);
         page.Controls.Add(Gap(14));
         page.Controls.Add(chart);
         page.Controls.Add(Gap(14));

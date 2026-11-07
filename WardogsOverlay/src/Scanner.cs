@@ -214,7 +214,12 @@ sealed class Scanner : IDisposable
         if (rec.Menu && !menuVisible) visit++;
         menuVisible = rec.Menu;
         // На стрельбище все цены $0 и баланс ненастоящий ($10 000) — в экономику не пишем.
-        if (rec.Menu && rec.Balance is int balance && rec.Cells.Any(c => c.Price > 0)) Economy.Add(balance, visit);
+        if (rec.Menu && rec.Balance is int balance && rec.Cells.Any(c => c.Price > 0))
+        {
+            Economy.Add(balance, visit);
+            var pts = Economy.Current.Points;
+            if (pts.Count > 0 && pts[^1].Balance == balance && rec.Weapon != null) TrackPurchase(rec, balance);
+        }
 
         if (rec.Menu && rec.Weapon != null)
         {
@@ -288,6 +293,9 @@ sealed class Scanner : IDisposable
                 model.Life += L.T($" · запас {lives}", $" · {lives} in reserve");
                 model.LifeWarn = lives < 3;
             }
+            // Окупаемость: сколько минут игры при твоём среднем темпе отбивают эту сборку.
+            if (Economy.AverageRate is double rate and > 0)
+                model.Life += L.T($" · окуп. {Math.Max(1, (int)Math.Ceiling(life / rate))} мин", $" · pays back in {Math.Max(1, (int)Math.Ceiling(life / rate))} min");
         }
         float u = (float)(client.H / 1080.0 * settings.OverlayScale);
         int x = client.X + rec.AnchorX + settings.OverlayOffsetX;
@@ -344,6 +352,40 @@ sealed class Scanner : IDisposable
             overlay.BeginInvoke(overlay.Conceal);
         }
         SetPlaque(plaque);
+    }
+
+    // Что было у продавца при прошлом показании баланса — чтобы понять, на что ушли деньги.
+    int? vendorBalance;
+    int vendorVisit = -1;
+    string? vendorWeapon;
+    List<Attachment> vendorAtts = [];
+
+    /// <summary>
+    /// Баланс упал в том же заходе к продавцу — это покупка. Что именно купили: новая пушка или
+    /// обвесы, которых не было в прошлый раз; иначе — патроны, броня или снаряжение.
+    /// </summary>
+    void TrackPurchase(Recognition rec, int balance)
+    {
+        var now = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList();
+        if (vendorBalance is int prev && vendorVisit == visit && balance < prev && !Economy.IsJump(prev, balance))
+        {
+            var bought = new List<string>();
+            string kind = "other";
+            if (vendorWeapon != rec.Weapon!.Slug) { bought.Add(L.Name(rec.Weapon)); kind = "weapon"; }
+            else
+                foreach (var a in now.Where(a => vendorAtts.All(x => x.Slug != a.Slug)))
+                {
+                    bought.Add(L.Name(a));
+                    kind = "attachments";
+                }
+            var what = bought.Count > 0 ? string.Join(", ", bought) : L.T("патроны, броня или снаряжение", "ammo, armour or gear");
+            Economy.AddPurchase(prev - balance, what, kind);
+            Log.Info($"Покупка: −{prev - balance} — {what}");
+        }
+        vendorBalance = balance;
+        vendorVisit = visit;
+        vendorWeapon = rec.Weapon!.Slug;
+        vendorAtts = now;
     }
 
     void SetForeground(bool fg)

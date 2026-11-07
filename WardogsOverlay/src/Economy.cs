@@ -4,26 +4,32 @@ namespace WardogsOverlay;
 
 sealed record MoneyPoint(DateTime Time, int Balance);
 
+/// <summary>Покупка у продавца: падение баланса в одном заходе и что за это время появилось в сборке.</summary>
+sealed record Purchase(DateTime Time, int Amount, string What, string Kind);
+
 sealed class EconomySession
 {
     public DateTime Start { get; set; } = DateTime.Now;
     public List<MoneyPoint> Points { get; set; } = [];
+    public List<Purchase> Purchases { get; set; } = [];
 
     public int Earned => Deltas().Where(d => d > 0).Sum();
     public int Spent => -Deltas().Where(d => d < 0).Sum();
     public int Net => Earned - Spent;
     public TimeSpan Duration => Points.Count < 2 ? TimeSpan.Zero : Points[^1].Time - Points[0].Time;
     /// <summary>Заработок в минуту (без учёта покупок) — сколько приносит игра.</summary>
-    public double EarnedPerMinute
+    public double EarnedPerMinute => CountedMinutes < 1 ? 0 : Earned / CountedMinutes;
+
+    /// <summary>Сколько минут учтено в темпе: время до скачка (стрельбище, другой аккаунт) не входит.</summary>
+    public double CountedMinutes
     {
         get
         {
-            // Время до скачка (стрельбище, другой аккаунт) в темп заработка не входит.
             double minutes = 0;
             for (int i = 1; i < Points.Count; i++)
                 if (!Economy.IsJump(Points[i - 1].Balance, Points[i].Balance))
                     minutes += (Points[i].Time - Points[i - 1].Time).TotalMinutes;
-            return minutes < 1 ? 0 : Earned / minutes;
+            return minutes;
         }
     }
 
@@ -95,6 +101,45 @@ sealed class Economy
 
     int? pending;
     int pendingVisit;
+
+    /// <summary>Записать покупку (падение баланса у продавца) — для «Куда ушли деньги».</summary>
+    public void AddPurchase(int amount, string what, string kind)
+    {
+        lock (gate)
+        {
+            Current.Purchases.Add(new Purchase(DateTime.Now, amount, what, kind));
+            if (Environment.TickCount64 - lastSave > 30_000) SaveLocked();
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Средний заработок в минуту по всем сессиям (и текущей) — для окупаемости и срока до цели.
+    /// Меньше 10 учтённых минут — не знаем.
+    /// </summary>
+    public double AverageRate
+    {
+        get
+        {
+            lock (gate)
+            {
+                var all = history.Contains(Current) ? history : history.Append(Current);
+                double minutes = all.Sum(s => s.CountedMinutes), earned = all.Sum(s => s.Earned);
+                return minutes < 10 ? 0 : earned / minutes;
+            }
+        }
+    }
+
+    /// <summary>Последний баланс у продавца (из любой сессии).</summary>
+    public int? LastBalance
+    {
+        get
+        {
+            lock (gate)
+                return Current.Points.Count > 0 ? Current.Points[^1].Balance
+                     : history.LastOrDefault(s => s.Points.Count > 0)?.Points[^1].Balance;
+        }
+    }
 
     public void NewSession()
     {

@@ -32,7 +32,9 @@ Database window (open it from the main window or the tray menu)
   Progression    — role level unlocks; set your level to highlight upcoming items.
   Budget loadout — weapon, optic of the chosen magnification, attachments, and armour
                    within the selected budget.
-  Economy        — session income, balance chart, and session history.
+  Economy        — session income, balance chart, session history, where the money went
+                   (purchases by kind) and a goal planner: money still needed and play time
+                   at your average rate for any item with an unlock cost.
   Patch          — changes in the latest game update: prices, unlock levels, and stats.
   Time to kill is an estimate for a burst to the chest with standard ammunition through
   level 2 body armour (≈).
@@ -129,7 +131,8 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
                 цена магазина и какие патроны брать против такой брони.
   Прогресс    — что открывается на каком уровне роли; укажи свой уровень — подсвечу ближайшее.
   Сборка под бюджет — пушка + прицел нужной кратности + обвесы + броня в заданную сумму.
-  Экономика   — заработок, график баланса, история сессий.
+  Экономика   — заработок, график баланса, история сессий, куда ушли деньги (покупки по видам)
+                и цель: сколько не хватает на открытие предмета и сколько играть при твоём темпе.
   Патч        — что изменилось в последнем обновлении (цены, уровни открытия, статы).
   Время убийства — оценка: очередь в грудь обычными патронами через бронежилет 2 ур. (≈).
 Кнопка «Карты» открывает интерактивные карты MetaForge (Bakurani, Ozeti, Zestafona).
