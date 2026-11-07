@@ -86,12 +86,22 @@ sealed class Economy
         {
             var pts = Current.Points;
             if (pts.Count > 0 && pts[^1].Balance == balance) { pending = null; return; }
+            // Скачок ровно в ~1000 раз — потеряна группа цифр («$304» вместо «$304 060»): верим длинному числу.
             if (pts.Count > 0 && IsJump(pts[^1].Balance, balance))
             {
+                double ratio = balance / (double)Math.Max(1, pts[^1].Balance);
+                if (ratio is >= 300 and <= 3000)
+                {
+                    pts.RemoveAt(pts.Count - 1);
+                    pending = null;
+                    goto accept;
+                }
+                if (ratio is >= 1 / 3000.0 and <= 1 / 300.0) return;
                 if (pending != balance) { pending = balance; pendingVisit = visit; return; }
                 if (pendingVisit == visit) return;
             }
             pending = null;
+        accept:
             pts.Add(new MoneyPoint(DateTime.Now, balance));
             if (!history.Contains(Current)) history.Add(Current);
             // Второе показание — сессия впервые попадает в файл: сохраняем сразу, не дожидаясь 30 с.

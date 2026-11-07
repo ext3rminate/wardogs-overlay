@@ -18,6 +18,10 @@ sealed class Recognition
     public string WeaponText = "";
     /// <summary>Всё, что OCR прочитал в подписи пушки (даже если название не совпало), — подсказка для картинки.</summary>
     public List<string> NameTexts = [];
+    /// <summary>Экран продавца без меню модулей (виден только баланс).</summary>
+    public bool VendorScreen;
+    /// <summary>Общий OCR увидел начало баланса («$304»), но дальше кусок числа не разобрался.</summary>
+    public int? FailedBalanceHead;
     public List<CellHit> Cells = [];
     public string? SelectedSlot;  // слот выбранной (оранжевой) ячейки
     public int? Balance;          // деньги игрока справа сверху
@@ -99,9 +103,10 @@ sealed class Recognizer(OcrService ocr)
         bool english = englishFirst || !ocr.HasRussian;
         var lines = english ? ocr.English(f) : ocr.Russian(f);
         var menu = FindMenu(f, lines, rec, english ? "en" : "ru");
+        List<OcrLineText>? other = null;
         if (menu == null && ocr.HasRussian)
         {
-            var other = english ? ocr.Russian(f) : ocr.English(f);
+            other = english ? ocr.Russian(f) : ocr.English(f);
             var second = FindMenu(f, other, rec, english ? "ru" : "en");
             if (second != null)
             {
@@ -110,7 +115,19 @@ sealed class Recognizer(OcrService ocr)
                 englishFirst = !english;
             }
         }
-        if (menu == null) return rec;
+        if (menu == null)
+        {
+            // Не меню модулей, но, может быть, другой экран продавца (пушки, снаряжение, гараж): баланс
+            // справа сверху виден и там — для экономики этого достаточно.
+            // Признак экрана продавца: подпись «// Продавец» / «VENDOR» слева вверху или пара сумм «корзина | баланс».
+            foreach (var ls in other == null ? [lines] : new[] { lines, other })
+            {
+                bool vendor = ls.SelectMany(l => l.Words).Any(w => w.Box.Y < f.H * 0.08 && TextUtil.IsVendorWord(w.Text));
+                if (ReadBalance(ls, f, rec, requirePair: !vendor) is int vb) { rec.Balance = vb; rec.VendorScreen = true; break; }
+            }
+            if (rec.Balance == null && rec.FailedBalanceHead != null && ReadBalanceCrop(f, rec) is int cb) { rec.Balance = cb; rec.VendorScreen = true; }
+            return rec;
+        }
         var (words, buttons, header, active, h) = menu.Value;
         rec.Reason = "";
         rec.Menu = true;
@@ -165,35 +182,7 @@ sealed class Recognizer(OcrService ocr)
         ax = (int)(ax / k); ay = (int)(Math.Max(0, ay) / k);
         rec.AnchorX = ax; rec.AnchorY = ay;
 
-        rec.Balance = ReadBalance(lines, f, rec);
-        if (rec.Balance == null)
-        {
-            // Мелкий белый текст на тёмных плашках общий OCR пропускает. Читаем тесный кусок у правого
-            // края крупно (×3): с большой пустой областью вокруг OCR не видит его вовсе.
-            // Только две плашки с суммами, без соседней с иконкой — иначе OCR сбивается.
-            var tight = RectI.FromLTRB(f.W - 307, 8, f.W - 115, 59).Intersect(f.Bounds);
-            if (!tight.IsEmpty)
-            {
-                var crop = f.Crop(tight);
-                string text = "";
-                foreach (var scale in new[] { 3, 4 })
-                {
-                    // Строки OCR не обязательно идут слева направо: сортируем по X, баланс — самая правая сумма.
-                    var ocrLines = ocr.Russian(crop.Resize(crop.W * scale, crop.H * scale))
-                        .Where(l => l.Words.Count > 0).OrderBy(l => l.Words.Min(w => w.Box.X)).ToList();
-                    text = string.Join(" ", ocrLines.Select(l => l.Text));
-                    var amounts = ocrLines.SelectMany(l => System.Text.RegularExpressions.Regex.Matches(
-                            TextUtil.DigitLike(l.Text.Replace('S', '$').Replace('§', '$')),
-                            @"\$\s*(\d{1,3}(?:[\s\u00A0\u202F,]\d{3})+|\d{1,9})(?!\w)"))
-                        .Select(m => new string(m.Groups[1].Value.Where(char.IsAsciiDigit).ToArray()))
-                        .Where(d => d.Length is > 0 and <= 9).Select(int.Parse).ToList();
-                    if (amounts.Count == 0) continue;
-                    rec.Balance = amounts[^1];
-                    break;
-                }
-                rec.Trace.Add($"деньги (крупно): «{text}» → {rec.Balance?.ToString() ?? "?"}");
-            }
-        }
+        rec.Balance = ReadBalance(lines, f, rec) ?? ReadBalanceCrop(f, rec);
 
         var slotZone = RectI.FromLTRB(nameZone.X, nameZone.Y, active.Box.Right + bh, active.Box.Bottom + bh);
         rec.Roi = ToRaw(slotZone.Union(strip).Intersect(f.Bounds));
@@ -266,16 +255,17 @@ sealed class Recognizer(OcrService ocr)
     /// Деньги игрока — справа сверху на экране продавца: «$0 | $10 000». Берём самую правую сумму.
     /// OCR разбивает «$10 000» на слова «$10» и «000», поэтому склеиваем соседние группы из трёх цифр.
     /// </summary>
-    internal static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec)
+    internal static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec, bool requirePair = false)
     {
         var zone = RectI.FromLTRB((int)(f.W * 0.68), 0, f.W, (int)(f.H * 0.09));
-        var amounts = new List<(int X, int? Value, string Text)>();
+        var amounts = new List<(int X, int? Value, string Text, int? Head)>();
         foreach (var line in lines)
         {
             var ws = line.Words.Where(w => zone.Contains(w.Box.CenterX, w.Box.CenterY)).OrderBy(w => w.Box.X).ToList();
             for (int i = 0; i < ws.Count; i++)
             {
-                var t = TextUtil.DigitLike(ws[i].Text.Replace('S', '$').Replace('§', '$'));
+                // «−$23 810» слева (в гараже) — тоже сумма: знак не мешает узнать пару «корзина | баланс».
+                var t = TextUtil.DigitLike(ws[i].Text.TrimStart('-', '−', '–', '+').Replace('S', '$').Replace('§', '$'));
                 if (!t.StartsWith('$')) continue;
                 int x = ws[i].Box.X, right = ws[i].Box.Right, gap = (int)(ws[i].Box.H * 1.2);
                 // «$» отдельным словом — цифры в следующем.
@@ -300,19 +290,61 @@ sealed class Recognizer(OcrService ocr)
                     if (next.Length != 3 || !next.All(char.IsAsciiDigit) || head.Length > 3) { ok = false; text += " " + next; break; }
                     digits += next; text += " " + next; right = ws[j].Box.Right; i = j;
                 }
-                amounts.Add((x, ok && digits.Length <= 9 && int.TryParse(digits, out var v) ? v : null, text));
+                int? headValue = head.Length is > 0 and <= 3 && head.All(char.IsAsciiDigit) ? int.Parse(head) : null;
+                amounts.Add((x, ok && digits.Length <= 9 && int.TryParse(digits, out var v) ? v : null, text, headValue));
             }
         }
         if (amounts.Count == 0) return null;
+        // На других экранах продавца (не меню модулей) верим только паре «корзина | баланс»:
+        // одиночная сумма в углу может быть чем угодно.
+        if (requirePair && amounts.Count < 2) return null;
         var best = amounts.MaxBy(a => a.X);
         // Самая правая сумма (баланс) не разобралась — не подставляем вместо неё левую ($0 корзины).
         if (best.Value == null)
         {
+            rec.FailedBalanceHead = best.Head;
             rec.Trace.Add($"деньги: {string.Join(" | ", amounts.Select(a => a.Text))} → не разобрал");
             return null;
         }
         rec.Trace.Add($"деньги: {string.Join(" | ", amounts.Select(a => a.Text))} → {best.Value}");
         return best.Value;
+    }
+
+    /// <summary>
+    /// Баланс крупным планом, когда общий OCR его не разобрал. Мелкий белый текст на тёмных плашках общий
+    /// OCR пропускает; тесный кусок у правого края читаем крупно (×3, ×4).
+    /// </summary>
+    int? ReadBalanceCrop(Frame f, Recognition rec)
+    {
+        // Мелкий белый текст на тёмных плашках общий OCR пропускает. Читаем тесный кусок у правого
+        // края крупно (×3): с большой пустой областью вокруг OCR не видит его вовсе.
+        // Только две плашки с суммами, без соседней с иконкой — иначе OCR сбивается.
+        var tight = RectI.FromLTRB(f.W - 307, 8, f.W - 115, 59).Intersect(f.Bounds);
+        if (!tight.IsEmpty)
+        {
+            var crop = f.Crop(tight);
+            string text = "";
+            foreach (var scale in new[] { 3, 4 })
+            {
+                // Строки OCR не обязательно идут слева направо: сортируем по X, баланс — самая правая сумма.
+                var ocrLines = ocr.Russian(crop.Resize(crop.W * scale, crop.H * scale))
+                    .Where(l => l.Words.Count > 0).OrderBy(l => l.Words.Min(w => w.Box.X)).ToList();
+                text = string.Join(" ", ocrLines.Select(l => l.Text));
+                var amounts = ocrLines.SelectMany(l => System.Text.RegularExpressions.Regex.Matches(
+                        TextUtil.DigitLike(l.Text.Replace('S', '$').Replace('§', '$')),
+                        @"\$\s*(\d{1,3}(?:[\s\u00A0\u202F,]\d{3})+|\d{1,9})(?!\w)"))
+                    .Select(m => new string(m.Groups[1].Value.Where(char.IsAsciiDigit).ToArray()))
+                    .Where(d => d.Length is > 0 and <= 9).Select(int.Parse).ToList();
+                if (amounts.Count == 0) continue;
+                // Общий OCR видел «$304» и ещё кусок числа — значит сумма длиннее; «$304» с крупного плана
+                // — та же потеря группы цифр, а не баланс.
+                if (rec.FailedBalanceHead is int head && amounts[^1] < head * 1000L) continue;
+                rec.Balance = amounts[^1];
+                break;
+            }
+            rec.Trace.Add($"деньги (крупно): «{text}» → {rec.Balance?.ToString() ?? "?"}");
+        }
+        return rec.Balance;
     }
 
     /// <summary>Только для проверки: не читать название, узнавать пушку лишь по картинке.</summary>
@@ -436,8 +468,9 @@ sealed class Recognizer(OcrService ocr)
         Frame f, List<OcrLineText> lines, Recognition rec, string engine)
     {
         var words = lines.SelectMany(l => l.Words).ToList();
-        var mods = words.Where(w => TextUtil.IsModulesWord(w.Text) && !HiddenWords.Contains(w.Text)).ToList();
-        var ammo = words.Where(w => TextUtil.IsAmmoWord(w.Text)).ToList();
+        // Верхний ряд вкладок продавца («… БОЕПРИПАСЫ · МАГАЗИНЫ · МОДУЛИ …» в гараже) — не кнопки ячеек.
+        var mods = words.Where(w => TextUtil.IsModulesWord(w.Text) && !HiddenWords.Contains(w.Text) && w.Box.Y > f.H * 0.08).ToList();
+        var ammo = words.Where(w => TextUtil.IsAmmoWord(w.Text) && w.Box.Y > f.H * 0.08).ToList();
         rec.Trace.Add($"OCR {engine}: слов {words.Count}, «МОДУЛИ»: {string.Join(" ", mods.Select(m => m.Box))}");
 
         // Кнопка «МОДУЛИ» / «ATTC.» стоит в одном ряду с «БОЕПРИПАСЫ» / «AMMO» слева от неё.

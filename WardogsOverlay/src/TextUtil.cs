@@ -139,6 +139,9 @@ static class TextUtil
     public static bool IsAmmoWord(string ocr) =>
         IsUiWord(ocr, "БОЕПРИПАСЫ") || Latinize(ocr).Replace('0', 'O') is "AMMO" or "AMM0" or "AMNO" or "ANMO";
 
+    /// <summary>Подпись экрана продавца слева вверху: «// Продавец…», «EQUIPMENT VENDOR».</summary>
+    public static bool IsVendorWord(string ocr) => IsUiWord(ocr, "ПРОДАВЕЦ") || IsUiWordEn(ocr, "VENDOR");
+
     public static bool IsSlotsWord(string ocr) =>
         IsUiWord(ocr, "ЯЧЕЙКИ") || IsUiWordEn(ocr, "EQUIPMENT") || IsUiWordEn(ocr, "SLOTS");
 
@@ -196,7 +199,7 @@ static class TextUtil
             {
                 'O' or 'o' or 'О' or 'о' or 'D' => '0',
                 'З' or 'з' => '3',
-                'б' => '6',
+                'б' or 'Б' or 'b' => '6',
                 'В' or 'B' => '8',
                 'l' or 'I' or '|' or '!' or 'і' => '1',
                 _ => c,

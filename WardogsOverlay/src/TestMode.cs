@@ -22,6 +22,7 @@ static class TestMode
         }
         if (files.Length >= 1 && files[0] == "--test-window") return TestWindow();
         if (files.Length >= 1 && files[0] == "--self-check") return SelfCheck();
+        if (files.Length >= 2 && files[0] == "--guide-plaque") return GuidePlaque(files[1], files.Contains("--en"));
         if (files.Length >= 1 && files[0] == "--where") { Console.WriteLine($"data: {AppPaths.Root} (portable: {AppPaths.Portable})"); return 0; }
         if (files.Length >= 2 && files[0] == "--test-welcome")
         {
@@ -47,7 +48,7 @@ static class TestMode
             Ui.Theme.Load();
             var st = new Settings { Language = L.Current };
             using var ov = new OverlayForm(st);
-            using var mf = new MainForm(st, ov) { Preview = true, StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
+            using var mf = new MainForm(st, ov) { Preview = true, StartPosition = FormStartPosition.Manual, Location = files.Contains("--onscreen") ? new Point(Screen.PrimaryScreen!.Bounds.X + 40, Screen.PrimaryScreen.Bounds.Y + 40) : new Point(-4000, -4000), ShowInTaskbar = false };
             mf.Show();
             if (files.Contains("--tall")) mf.Height = 4200; // всё окно целиком, без прокрутки
             if (files.Contains("--bottom")) { Application.DoEvents(); mf.PreviewScrollToEnd(); }
@@ -197,6 +198,34 @@ static class TestMode
 
     /// <summary>Открывает окно «База», рисует каждую вкладку в PNG и печатает результаты сборки под бюджет.</summary>
     /// <summary>Проверки логики без игры и без OCR: разбор баланса, экономика, статы, подбор.</summary>
+    /// <summary>
+    /// Плашка для скриншота в руководстве: Galil с обвесами, строки «выстрелы до убийства» и «цена жизни»,
+    /// заработок — на демонстрационных цифрах.
+    /// </summary>
+    static int GuidePlaque(string outPath, bool en)
+    {
+        L.Current = en ? Lang.En : Lang.Ru;
+        Ui.Theme.Load();
+        var data = GameData.Load();
+        var w = data.Weapons.First(x => x.Slug == "galil");
+        string[] names = ["Compact T-2 Red Dot", "AFG Angled Foregrip", "Hexagon Brake", "Galil 35 RND Magazine"];
+        var cells = names.Select(n => data.Attachments.Values.FirstOrDefault(a => a.Name == n && a.Fits?.Contains(w.Slug) == true))
+                         .OfType<Attachment>().Select(a => new CellHit { Att = a }).ToList();
+        var s = new Settings { ShowSlotOptions = false, ShowKill = true, ShowLifeCost = true, TargetArmour = 2, TargetDistance = 50, MyArmour = 2 };
+        var model = OverlayModel.Build(w, cells, null, data, null, s);
+        model.Money = L.T("сессия +$22 700 · $567/мин", "session +$22 700 · $567/min");
+        int life = model.LifeCost ?? 0;
+        model.Life = $"≈ {L.Money(life)}" + L.T($" · запас {24800 / Math.Max(1, life)} · окуп. {(int)Math.Ceiling(life / 567.0)} мин",
+                                                $" · {24800 / Math.Max(1, life)} in reserve · pays back in {(int)Math.Ceiling(life / 567.0)} min");
+        float u = 600f / OverlayRenderer.Measure(model, 1f).Width;
+        var size = OverlayRenderer.Measure(model, u);
+        using var bmp = new Bitmap(size.Width, size.Height);
+        using (var g = Graphics.FromImage(bmp)) OverlayRenderer.Draw(g, model, u);
+        bmp.Save(outPath);
+        Console.WriteLine($"→ {outPath} {size.Width}x{size.Height}, атт: {cells.Count}");
+        return 0;
+    }
+
     static int SelfCheck()
     {
         int fails = 0;
@@ -227,6 +256,11 @@ static class TestMode
         Check("испорченная группа → не знаю, а не $324", Balance("$0", "|", "$324", "9?5") == null, Balance("$0", "|", "$324", "9?5")?.ToString() ?? "null");
         Check("правая сумма не читается → не $0 корзины", Balance("$0", "|", "$abc") == null, Balance("$0", "|", "$abc")?.ToString() ?? "null");
 
+        Check("«$304 0Б0» — это $304 060 (Б как 6)", Balance("$0", "|", "$304", "0Б0") == 304060, Balance("$0", "|", "$304", "0Б0")?.ToString() ?? "null");
+        var ecoTest = new EconomySession();
+        var tj = DateTime.Now;
+        Check("одиночная сумма не принимается на экране без меню", Recognizer.ReadBalance([new OcrLineText("$280 787", [new OcrWord("$280", new RectI(1700, 30, 48, 20)), new OcrWord("787", new RectI(1756, 30, 36, 20))])],
+              new Frame(1920, 1080), new Recognition(), requirePair: true) == null);
         Check("баланс английской игры $0 | $12,500", Balance("$0", "|", "$12,500") == 12500, Balance("$0", "|", "$12,500")?.ToString() ?? "null");
 
         // Слова интерфейса: русская игра (русским и английским OCR) и английская игра.
@@ -252,6 +286,16 @@ static class TestMode
         using (var z = System.IO.Compression.ZipFile.OpenRead(report))
             Check("отчёт о проблеме: архив с system.txt", z.Entries.Any(e => e.Name == "system.txt"), string.Join(", ", z.Entries.Select(e => e.FullName)));
         File.Delete(report);
+
+        // Неверное первое показание ($304 вместо $304 060) не должно отравлять сессию.
+        var ecoFix = new Economy();
+        ecoFix.NewSession();
+        ecoFix.Add(304, 1);
+        ecoFix.Add(304060, 1);
+        Check("$304 → $304 060: потерянная группа цифр заменяется", ecoFix.Current.Points.Count == 1 && ecoFix.Current.Points[^1].Balance == 304060,
+              string.Join(", ", ecoFix.Current.Points.Select(pp => pp.Balance)));
+        ecoFix.Add(304, 1);
+        Check("и обратно $304 после $304 060 не принимается", ecoFix.Current.Points[^1].Balance == 304060);
 
         // Экономика: стрельбище $10 000 → продавец $324 935 → $376 326 (реальная сессия 29.10).
         var s = new EconomySession();

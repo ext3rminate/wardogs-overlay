@@ -2,6 +2,12 @@
 
 ## English
 
+### 1.2.1 — 2026-11-08
+
+- The balance is read on every vendor screen (weapons, gear, garage and so on), not only in the attachments menu, so session income and purchases are recorded during a whole match.
+- A misread balance no longer breaks a session: a reading that lost a digit group (for example $304 instead of $304 060) is replaced by the full number, and "Б" read instead of "6" is understood.
+- The vendor's top tab bar ("… AMMO · MAGAZINES · MODULES …" in the garage) is no longer mistaken for the attachments menu.
+
 ### 1.2.0 — 2026-11-07
 
 - Game data refreshes automatically from MetaForge at startup (if not checked within an hour) and every 6 hours, and is swapped in without a restart. When a new game patch appears, the main window shows a banner and the tray shows a notification.
@@ -55,6 +61,12 @@
 ---
 
 ## Русский
+
+### 1.2.1 — 2026-11-08
+
+- Баланс читается на любом экране продавца (пушки, снаряжение, гараж и т. д.), а не только в меню модулей — заработок и покупки записываются всю катку.
+- Неверно прочитанный баланс больше не ломает сессию: показание с потерянной группой цифр ($304 вместо $304 060) заменяется полным числом, «Б» вместо «6» понимается.
+- Верхний ряд вкладок продавца («… БОЕПРИПАСЫ · МАГАЗИНЫ · МОДУЛИ …» в гараже) больше не принимается за меню модулей.
 
 ### 1.2.0 — 2026-11-07
 

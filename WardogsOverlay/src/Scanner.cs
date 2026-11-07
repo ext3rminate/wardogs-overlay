@@ -233,12 +233,15 @@ sealed class Scanner : IDisposable
 
         if (rec.Menu && !menuVisible) visit++;
         menuVisible = rec.Menu;
-        // На стрельбище все цены $0 и баланс ненастоящий ($10 000) — в экономику не пишем.
-        if (rec.Menu && rec.Balance is int balance && rec.Cells.Any(c => c.Price > 0))
+        // Баланс — с любого экрана продавца. На стрельбище все цены $0 и баланс ненастоящий ($10 000) —
+        // в экономику не пишем: ячейки есть, но ни одной цены, или ровно $10 000 без цен на экране.
+        bool priced = rec.Cells.Any(c => c.Price > 0);
+        bool range = rec.Cells.Count > 0 && !priced || rec.Balance == 10000 && !priced;
+        if ((rec.Menu || rec.VendorScreen) && rec.Balance is int balance && !range)
         {
             Economy.Add(balance, visit);
             var pts = Economy.Current.Points;
-            if (pts.Count > 0 && pts[^1].Balance == balance && rec.Weapon != null) TrackPurchase(rec, balance);
+            if (pts.Count > 0 && pts[^1].Balance == balance) TrackPurchase(rec, balance);
         }
 
         if (rec.Menu && rec.Weapon != null)
@@ -389,26 +392,24 @@ sealed class Scanner : IDisposable
         var now = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList();
         if (vendorBalance is int prev && balance < prev && !Economy.IsJump(prev, balance))
         {
-            var (what, kind) = Attribute(prev - balance, rec.Weapon!, now, vendorWeapon, vendorAtts);
+            var (what, kind) = Attribute(prev - balance, rec.Weapon, now, vendorWeapon, vendorAtts);
             Economy.AddPurchase(prev - balance, what, kind);
             Log.Info($"Покупка: −{prev - balance} — {what}");
         }
         vendorBalance = balance;
-        vendorWeapon = rec.Weapon!.Slug;
-        vendorAtts = now;
+        // Состав сборки запоминаем только из меню модулей: на других экранах продавца ячеек нет.
+        if (rec.Weapon != null) { vendorWeapon = rec.Weapon.Slug; vendorAtts = now; }
     }
 
-    internal static (string What, string Kind) Attribute(int spent, Weapon w, List<Attachment> now, string? prevWeapon, List<Attachment> prevAtts)
+    internal static (string What, string Kind) Attribute(int spent, Weapon? w, List<Attachment> now, string? prevWeapon, List<Attachment> prevAtts)
     {
         string open = L.T("открытие: ", "unlock: ");
-        var options = new List<(string What, int Cost, string Kind)>
+        var options = new List<(string What, int Cost, string Kind)>();
+        if (w != null) options.Add((L.Name(w), w.Price, "weapon"));
+        if (w?.Unlock is { Cash: > 0 } wu)
         {
-            (L.Name(w), w.Price, "weapon"),
-        };
-        if (w.Unlock is { Cash: > 0 } wu)
-        {
-            options.Add((open + L.Name(w), wu.Cash, "unlock"));
-            options.Add((open + L.Name(w), wu.Cash + w.Price, "unlock"));
+            options.Add((open + L.Name(w!), wu.Cash, "unlock"));
+            options.Add((open + L.Name(w!), wu.Cash + w!.Price, "unlock"));
         }
         foreach (var a in now)
         {
@@ -427,9 +428,9 @@ sealed class Scanner : IDisposable
         for (int i = 0; i < atts.Count; i++)
             for (int j = i + 1; j < atts.Count; j++)
                 if (atts[i].Cost + atts[j].Cost == spent) return ($"{atts[i].What}, {atts[j].What}", "attachments");
-        var added = prevWeapon == w.Slug ? now.Where(a => prevAtts.All(x => x.Slug != a.Slug)).Select(L.Name).ToList() : [];
+        var added = w != null && prevWeapon == w.Slug ? now.Where(a => prevAtts.All(x => x.Slug != a.Slug)).Select(L.Name).ToList() : [];
         return added.Count > 0 ? (string.Join(", ", added), "attachments")
-                               : (L.T("патроны, броня или снаряжение", "ammo, armour or gear"), "other");
+                               : (L.T("патроны, броня, снаряжение или техника", "ammo, armour, gear or vehicles"), "other");
     }
 
     void SetForeground(bool fg)
