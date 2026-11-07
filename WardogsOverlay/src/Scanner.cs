@@ -241,7 +241,9 @@ sealed class Scanner : IDisposable
         {
             Economy.Add(balance, visit);
             var pts = Economy.Current.Points;
+            frameForPurchase = frame;
             if (pts.Count > 0 && pts[^1].Balance == balance) TrackPurchase(rec, balance);
+            frameForPurchase = null;
         }
 
         if (rec.Menu && rec.Weapon != null)
@@ -380,6 +382,7 @@ sealed class Scanner : IDisposable
     // Что было у продавца при прошлом показании баланса — чтобы понять, на что ушли деньги.
     int? vendorBalance;
     string? vendorWeapon;
+    Frame? frameForPurchase;
     List<Attachment> vendorAtts = [];
 
     /// <summary>
@@ -392,45 +395,25 @@ sealed class Scanner : IDisposable
         var now = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList();
         if (vendorBalance is int prev && balance < prev && !Economy.IsJump(prev, balance))
         {
-            var (what, kind) = Attribute(prev - balance, rec.Weapon, now, vendorWeapon, vendorAtts);
+            int spent = prev - balance;
+            // Картинка над ценником на ровно потраченную сумму — по ней узнаём предмет, если названия на экране нет.
+            DbItem? ByIcon(List<DbItem> cands)
+            {
+                if (frameForPurchase == null) return null;
+                foreach (var tag in rec.PriceTags.Where(t => t.Value == spent))
+                {
+                    var (item, score, second) = recognizer.ItemAt(frameForPurchase, tag.Box, cands);
+                    if (item != null && score >= 0.45 && (cands.Count == 1 || score - second >= 0.04)) return item;
+                }
+                return null;
+            }
+            var (what, kind) = PurchaseMatcher.Attribute(recognizer.Data, spent, rec.Weapon, now, vendorWeapon, vendorAtts, rec.ScreenLines, ByIcon);
             Economy.AddPurchase(prev - balance, what, kind);
             Log.Info($"Покупка: −{prev - balance} — {what}");
         }
         vendorBalance = balance;
         // Состав сборки запоминаем только из меню модулей: на других экранах продавца ячеек нет.
         if (rec.Weapon != null) { vendorWeapon = rec.Weapon.Slug; vendorAtts = now; }
-    }
-
-    internal static (string What, string Kind) Attribute(int spent, Weapon? w, List<Attachment> now, string? prevWeapon, List<Attachment> prevAtts)
-    {
-        string open = L.T("открытие: ", "unlock: ");
-        var options = new List<(string What, int Cost, string Kind)>();
-        if (w != null) options.Add((L.Name(w), w.Price, "weapon"));
-        if (w?.Unlock is { Cash: > 0 } wu)
-        {
-            options.Add((open + L.Name(w!), wu.Cash, "unlock"));
-            options.Add((open + L.Name(w!), wu.Cash + w!.Price, "unlock"));
-        }
-        foreach (var a in now)
-        {
-            options.Add((L.Name(a), a.ShopPrice, "attachments"));
-            if (a.Unlock is { Cash: > 0 } au)
-            {
-                options.Add((open + L.Name(a), au.Cash, "unlock"));
-                options.Add((open + L.Name(a), au.Cash + a.ShopPrice, "unlock"));
-            }
-        }
-        // Ровно по цене — самое надёжное (цены ячеек на экране и в базе совпадают до доллара).
-        var exact = options.FirstOrDefault(o => o.Cost == spent);
-        if (exact.What != null) return (exact.What, exact.Kind);
-        // Два обвеса разом (быстрые покупки между двумя показаниями баланса).
-        var atts = options.Where(o => o.Kind == "attachments").ToList();
-        for (int i = 0; i < atts.Count; i++)
-            for (int j = i + 1; j < atts.Count; j++)
-                if (atts[i].Cost + atts[j].Cost == spent) return ($"{atts[i].What}, {atts[j].What}", "attachments");
-        var added = w != null && prevWeapon == w.Slug ? now.Where(a => prevAtts.All(x => x.Slug != a.Slug)).Select(L.Name).ToList() : [];
-        return added.Count > 0 ? (string.Join(", ", added), "attachments")
-                               : (L.T("патроны, броня, снаряжение или техника", "ammo, armour, gear or vehicles"), "other");
     }
 
     void SetForeground(bool fg)

@@ -92,6 +92,7 @@ sealed class DbItem
     public string? CalibreKey { get; init; }
     public string? RoundType { get; init; }
     public int? Amount { get; init; }
+    public string Icon { get; init; } = "";
 }
 
 /// <summary>Бронежилет или шлем: снижение урона, прочность, что закрывает.</summary>
@@ -169,9 +170,15 @@ sealed class GameData
         {
             var missing = File.Exists(MissingIconsPath) ? File.ReadAllLines(MissingIconsPath).ToHashSet() : [];
             return Weapons.Any(w => !string.IsNullOrEmpty(w.Icon) && IconFile(w.Icon) == null && !missing.Contains(w.Icon)) ||
+                   VendorItemIcons().Any(i => IconFile(i) == null && !missing.Contains(i)) ||
                    OptionalFiles.Any(f => !File.Exists(JsonPath(f)));
         }
     }
+
+    /// <summary>Иконки всего, что продаётся за деньги (снаряжение, патроны, броня, техника…) — чтобы узнавать покупки.</summary>
+    public IEnumerable<string> VendorItemIcons() =>
+        Items.Where(i => i.Price > 0 && (i.InVendor || i.Unlock is { Cash: > 0 }) && i.Tab is not ("weapons" or "attachments") && i.Icon.Length > 0)
+             .Select(i => i.Icon).Distinct();
 
     public string? IconFile(string icon)
     {
@@ -230,7 +237,9 @@ sealed class GameData
         }
 
         var data = Load();
+        var missingBefore = File.Exists(MissingIconsPath) ? File.ReadAllLines(MissingIconsPath).ToHashSet() : [];
         var icons = data.Attachments.Values.Select(a => a.Icon).Concat(data.Weapons.Select(w => w.Icon))
+            .Concat(data.VendorItemIcons().Where(i => !missingBefore.Contains(i)))
             .Where(i => !string.IsNullOrEmpty(i) && data.IconFile(i) == null)
             .Distinct().ToList();
         report(L.T($"Скачиваю иконки: {icons.Count} шт.…", $"Downloading icons: {icons.Count}…"));
@@ -313,6 +322,7 @@ sealed class GameData
                     Description = Str(it, "description") ?? "",
                     Calibre = Str(it, "calibreLabel") ?? Str(it, "calibre"), CalibreKey = Str(it, "calibre"), RoundType = Str(it, "roundType"),
                     Amount = Num(it, "amount") is double am ? (int)am : null,
+                    Icon = Str(it, "icon") ?? "",
                 });
             }
 

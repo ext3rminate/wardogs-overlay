@@ -18,6 +18,10 @@ sealed class Recognition
     public string WeaponText = "";
     /// <summary>Всё, что OCR прочитал в подписи пушки (даже если название не совпало), — подсказка для картинки.</summary>
     public List<string> NameTexts = [];
+    /// <summary>Ценники на экране (сумма и место в координатах исходного кадра) — по ним узнаём покупку.</summary>
+    public List<(int Value, RectI Box)> PriceTags = [];
+    /// <summary>Строки текста с экрана — по ним узнаём, что именно куплено (название выбранного предмета).</summary>
+    public List<string> ScreenLines = [];
     /// <summary>Экран продавца без меню модулей (виден только баланс).</summary>
     public bool VendorScreen;
     /// <summary>Общий OCR увидел начало баланса («$304»), но дальше кусок числа не разобрался.</summary>
@@ -119,6 +123,8 @@ sealed class Recognizer(OcrService ocr)
         {
             // Не меню модулей, но, может быть, другой экран продавца (пушки, снаряжение, гараж): баланс
             // справа сверху виден и там — для экономики этого достаточно.
+            rec.ScreenLines = lines.Concat(other ?? []).Select(l => l.Text).ToList();
+            rec.PriceTags = PriceTagsOf(lines.Concat(other ?? []), f, ToRaw);
             // Признак экрана продавца: подпись «// Продавец» / «VENDOR» слева вверху или пара сумм «корзина | баланс».
             foreach (var ls in other == null ? [lines] : new[] { lines, other })
             {
@@ -129,6 +135,8 @@ sealed class Recognizer(OcrService ocr)
             return rec;
         }
         var (words, buttons, header, active, h) = menu.Value;
+        rec.ScreenLines = lines.Select(l => l.Text).ToList();
+        rec.PriceTags = PriceTagsOf(lines, f, ToRaw);
         rec.Reason = "";
         rec.Menu = true;
         rec.Trace.Add($"заголовок {header.Box}, активная кнопка {active.Box}");
@@ -345,6 +353,37 @@ sealed class Recognizer(OcrService ocr)
             rec.Trace.Add($"деньги (крупно): «{text}» → {rec.Balance?.ToString() ?? "?"}");
         }
         return rec.Balance;
+    }
+
+    /// <summary>Ценники «$750» на экране (не в верхней полосе с балансом).</summary>
+    static List<(int Value, RectI Box)> PriceTagsOf(IEnumerable<OcrLineText> lines, Frame f, Func<RectI, RectI> toRaw)
+    {
+        var tags = new List<(int, RectI)>();
+        foreach (var w in lines.SelectMany(l => l.Words))
+        {
+            if (w.Box.Y < f.H * 0.08) continue;
+            var t = TextUtil.DigitLike(w.Text.Replace('S', '$'));
+            if (!t.StartsWith('$') || t.Length < 2) continue;
+            var digits = new string(t[1..].Where(char.IsAsciiDigit).ToArray());
+            if (digits.Length is > 0 and <= 7 && t[1..].All(c => char.IsAsciiDigit(c) || c is ',' or ' ') && int.TryParse(digits, out var v))
+                tags.Add((v, toRaw(w.Box)));
+        }
+        return tags;
+    }
+
+    /// <summary>
+    /// Что за предмет над ценником на экране продавца: карточка — квадрат с картинкой, ценник в её правом
+    /// нижнем углу. Сравниваем картинку с иконками кандидатов (тех, что стоят ровно столько).
+    /// </summary>
+    public (DbItem? Item, double Score, double Second) ItemAt(Frame raw, RectI tag, List<DbItem> candidates)
+    {
+        int th = Math.Max(6, tag.H);
+        var card = RectI.FromLTRB(tag.Right - 9 * th, tag.Y - (int)(6.6 * th), tag.Right, tag.Y - th / 6).Intersect(raw.Bounds);
+        if (card.W < 20 || card.H < 20) return (null, 0, 0);
+        int cw = card.W, ch = card.H;
+        // Не сравниваем значок количества слева сверху и рамку.
+        bool Allowed(int x, int y) => x >= 2 && y >= 2 && x < cw - 2 && y < ch - 2 && !(x < cw * 0.15 && y < ch * 0.18);
+        return icons.Match(raw, card, Allowed, candidates, i => i.Icon, IconMatcher.WeaponFits);
     }
 
     /// <summary>Только для проверки: не читать название, узнавать пушку лишь по картинке.</summary>

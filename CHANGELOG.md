@@ -7,6 +7,7 @@
 - The balance is read on every vendor screen (weapons, gear, garage and so on), not only in the attachments menu, so session income and purchases are recorded during a whole match.
 - A misread balance no longer breaks a session: a reading that lost a digit group (for example $304 instead of $304 060) is replaced by the full number, and "Б" read instead of "6" is understood.
 - The vendor's top tab bar ("… AMMO · MAGAZINES · MODULES …" in the garage) is no longer mistaken for the attachments menu.
+- "Where the money went" names what was bought: the whole vendor catalogue is matched by exact price or unlock cost, then the item whose name is on screen wins; if the screen shows a price tag for exactly the amount spent, the picture above it is matched against item icons (icons of everything the vendor sells are downloaded once). Ammo packs are counted for the current weapon. A match found only by price is marked "probably", several matches are listed.
 
 ### 1.2.0 — 2026-11-07
 
@@ -67,6 +68,7 @@
 - Баланс читается на любом экране продавца (пушки, снаряжение, гараж и т. д.), а не только в меню модулей — заработок и покупки записываются всю катку.
 - Неверно прочитанный баланс больше не ломает сессию: показание с потерянной группой цифр ($304 вместо $304 060) заменяется полным числом, «Б» вместо «6» понимается.
 - Верхний ряд вкладок продавца («… БОЕПРИПАСЫ · МАГАЗИНЫ · МОДУЛИ …» в гараже) больше не принимается за меню модулей.
+- «Куда ушли деньги» называет покупку: весь каталог продавца сверяется по точной цене или цене открытия, из совпавших выбирается предмет, чьё название на экране; если на экране виден ценник ровно на потраченную сумму, картинка над ним сравнивается с иконками (иконки всего, что продаётся, скачиваются один раз). Пачки патронов считаются к текущей пушке. Совпадение только по цене помечается «вероятно», несколько — перечисляются.
 
 ### 1.2.0 — 2026-11-07
 

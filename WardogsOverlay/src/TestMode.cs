@@ -23,6 +23,38 @@ static class TestMode
         if (files.Length >= 1 && files[0] == "--test-window") return TestWindow();
         if (files.Length >= 1 && files[0] == "--self-check") return SelfCheck();
         if (files.Length >= 2 && files[0] == "--guide-plaque") return GuidePlaque(files[1], files.Contains("--en"));
+        if (files.Length >= 2 && files[0] == "--purchase")
+        {
+            // Что куплено за N долларов; с картинкой — как в игре: текст экрана и картинки над ценниками.
+            if (!GameData.IsDownloaded || GameData.Load().NeedsUpdate) GameData.DownloadAsync(Console.WriteLine).GetAwaiter().GetResult();
+            var d = GameData.Load();
+            int spent = int.Parse(files[1]);
+            var rcg = new Recognizer(new OcrService()) { Data = d };
+            Recognition r = new();
+            Frame? fr = null;
+            if (files.Length >= 3 && files[2] != "x")
+            {
+                using var b = new Bitmap(files[2]);
+                fr = Frame.FromBitmap(b);
+                r = rcg.Run(fr);
+                Console.WriteLine($"  ценники: {string.Join(", ", r.PriceTags.Select(t => "$" + t.Value))}");
+            }
+            var w = files.Length >= 4 ? d.Weapons.FirstOrDefault(x => x.Slug == files[3]) : null;
+            DbItem? ByIcon(List<DbItem> cands)
+            {
+                if (fr == null) return null;
+                foreach (var tag in r.PriceTags.Where(t => t.Value == spent))
+                {
+                    var (item, score, second) = rcg.ItemAt(fr, tag.Box, cands);
+                    Console.WriteLine($"  картинка над ${tag.Value} {tag.Box}: {item?.Name} ({score:0.00}, следующая {second:0.00}) из {cands.Count}");
+                    if (item != null && score >= 0.45 && (cands.Count == 1 || score - second >= 0.04)) return item;
+                }
+                return null;
+            }
+            var (what, kind) = PurchaseMatcher.Attribute(d, spent, w, [], null, [], r.ScreenLines, ByIcon);
+            Console.WriteLine($"−${spent}: [{kind}] {what}");
+            return 0;
+        }
         if (files.Length >= 1 && files[0] == "--where") { Console.WriteLine($"data: {AppPaths.Root} (portable: {AppPaths.Portable})"); return 0; }
         if (files.Length >= 2 && files[0] == "--test-welcome")
         {
@@ -361,12 +393,20 @@ static class TestMode
         var mag60 = data.Attachments.Values.FirstOrDefault(a => a.Name == "AK74 60 RND Magazine");
         if (mag60 != null)
         {
-            var (what, kind) = Scanner.Attribute(30000, ak, [mag60], "galil", []);
+            var (what, kind) = PurchaseMatcher.Attribute(data, 30000, ak, [mag60], "galil", [], []);
             Check("покупка −$30 000 = открытие магазина AK74 на 60", kind == "unlock" && what.Contains(L.Name(mag60)), $"{kind}: {what}");
-            var (w2, k2) = Scanner.Attribute(mag60.ShopPrice, ak, [mag60], "ak74", []);
+            var (w2, k2) = PurchaseMatcher.Attribute(data, mag60.ShopPrice, ak, [mag60], "ak74", [], []);
             Check("покупка по цене обвеса", k2 == "attachments" && w2 == L.Name(mag60), $"{k2}: {w2}");
-            var (w3, k3) = Scanner.Attribute(77, ak, [mag60], "ak74", [mag60]);
+            var (w3, k3) = PurchaseMatcher.Attribute(data, 77, ak, [mag60], "ak74", [mag60], []);
             Check("непонятная сумма — патроны, броня или снаряжение", k3 == "other", $"{k3}: {w3}");
+            var (pAmmo, _) = PurchaseMatcher.Attribute(data, 30, ak, [], "ak74", [], []);
+            Check("мелкая покупка — патроны к текущей пушке", pAmmo.Contains("5.45"), pAmmo);
+            var smokeItem = data.Items.FirstOrDefault(i => i.Name == "Smoke" && i.Price > 0);
+            if (smokeItem != null)
+            {
+                var (pIcon, _) = PurchaseMatcher.Attribute(data, smokeItem.Price!.Value, null, [], null, [], [], c => c.FirstOrDefault(i => i.Name == "Smoke"));
+                Check("покупка по картинке над ценником", pIcon == L.Name(smokeItem), pIcon);
+            }
         }
 
         var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
