@@ -39,6 +39,18 @@ sealed class Settings
     /// <summary>Цена жизни (что теряешь при смерти без реанимации) и запас жизней по балансу.</summary>
     public bool ShowLifeCost { get; set; } = true;
     public int MyArmour { get; set; } = 2;
+    /// <summary>
+    /// Уровни ролей игрока (Career, Infantry, Medic…): у каждой роли свой уровень, качаются они
+    /// независимо. Задаются в «Прогрессе»; пусто — уровни не указаны, ничего не отсекаем.
+    /// </summary>
+    public Dictionary<string, int> RoleLevels { get; set; } = [];
+    /// <summary>Сборка под бюджет и подбор на плашке — только из того, что уже открыто по этим уровням.</summary>
+    public bool OnlyUnlocked { get; set; } = true;
+
+    /// <summary>Уровни для фильтра «только открытое» или null, если фильтр выключен или уровни не заданы.</summary>
+    public Dictionary<string, int>? UnlockLevels() =>
+        OnlyUnlocked && RoleLevels.Count > 0 ? L.Roles.ToDictionary(r => r, r => RoleLevels.GetValueOrDefault(r, 1)) : null;
+
     /// <summary>Цель для накопления (предмет, который хочется открыть) — slug из базы.</summary>
     public string? GoalSlug { get; set; }
     /// <summary>Ставить новые версии с GitHub самому (когда игра не на переднем плане). Выключено — только предлагать.</summary>
@@ -101,6 +113,8 @@ sealed class Settings
     {
         WindowClass ??= "";
         MyWeapons ??= [];
+        RoleLevels ??= [];
+        foreach (var k in RoleLevels.Keys.ToList()) RoleLevels[k] = Math.Clamp(RoleLevels[k], 1, 200);
         if (WindowTitleContains == null || WindowTitleContains.Length == 0) WindowTitleContains = new Settings().WindowTitleContains;
         OverlayScale = double.IsFinite(OverlayScale) ? Math.Clamp(OverlayScale, 0.5, 3) : 1;
         Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.94;

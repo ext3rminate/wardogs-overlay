@@ -85,7 +85,7 @@ sealed class OverlayModel
             if (s.ShowSlotOptions && selectedSlot != null)
                 options = Builds.Options(data, w, atts, selectedSlot, Math.Clamp(s.SlotOptionsMax, 3, 15));
             if (s.BestPriority is Priority p)
-                best = Builds.Best(data, w, atts, p, s.BestBudget > 0 ? s.BestBudget : null);
+                best = Builds.Best(data, w, atts, p, s.BestBudget > 0 ? s.BestBudget : null, s.UnlockLevels());
         }
 
         (string, string)? kill = null;

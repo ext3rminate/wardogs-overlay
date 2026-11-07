@@ -292,6 +292,17 @@ static class TestMode
         var kl = OverlayModel.KillLine(data, ak, 2, 50);
         Check("строка плашки про убийство", kl?.What.Contains("7") == true, kl is { } x ? $"{x.Where}: {x.What}" : "null");
 
+        // Сборка под бюджет учитывает уровни ролей: при уровнях 1 нет ничего, что открывается позже.
+        var low = L.Roles.ToDictionary(r => r, _ => 1);
+        var lowList = Builds.BestLoadouts(data, new Builds.LoadoutRequest { Budget = 15000, ArmourLevel = 0, Sight = Builds.SightBand.None, Levels = low }, 10);
+        var allList = Builds.BestLoadouts(data, new Builds.LoadoutRequest { Budget = 15000, ArmourLevel = 0, Sight = Builds.SightBand.None }, 10);
+        bool lowOk = lowList.All(l => Builds.Unlocked(l.Weapon.Unlock, low) && l.Atts.All(a => Builds.Unlocked(a.Unlock, low)));
+        Check("сборка при уровнях 1 — только открытое", lowOk && lowList.Select(l => l.Weapon.Slug).ToHashSet().IsSubsetOf(allList.Select(l => l.Weapon.Slug).Concat(lowList.Select(l => l.Weapon.Slug))),
+              $"{string.Join(", ", lowList.Select(l => l.Weapon.Name))} | без уровней: {string.Join(", ", allList.Take(5).Select(l => l.Weapon.Name))}");
+        var m4 = data.Weapons.FirstOrDefault(w => w.Slug == "m4");
+        if (m4?.Unlock is { Level: > 1 } mu)
+            Check($"M4 ({L.UnlockText(mu)}) не предлагается, пока роль ниже", lowList.All(l => l.Weapon.Slug != "m4"));
+
         var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
         var scope = data.Attachments.Values.Where(a => a.SlotKey == "Sight" && a.Zoom >= 4 && a.Fits?.Count > 0).FirstOrDefault();
         var w4 = scope == null ? null : data.Weapons.FirstOrDefault(w => scope.Fits!.Contains(w.Slug));
@@ -339,7 +350,11 @@ static class TestMode
         s.Purchases.Add(new Purchase(t.AddMinutes(28), 820, L.T("Вертикальная передняя рукоятка TDG", "TDG Vertical Foregrip"), "attachments"));
         s.Purchases.Add(new Purchase(t.AddMinutes(28), 1260, L.T("Глушитель PBS-4", "PBS-4 Suppressor"), "attachments"));
         s.Purchases.Add(new Purchase(t.AddMinutes(29), 600, L.T("патроны, броня или снаряжение", "ammo, armour or gear"), "other"));
-        var testSettings = new Settings { GoalSlug = data.Items.FirstOrDefault(i => i.Unlock is { Cash: > 100_000 })?.Slug };
+        var testSettings = new Settings
+        {
+            GoalSlug = data.Items.FirstOrDefault(i => i.Unlock is { Cash: > 100_000 })?.Slug,
+            RoleLevels = new() { ["Career"] = 12, ["Recon"] = 33, ["Infantry"] = 5 },
+        };
 
         Ui.Theme.Load();
         using var form = new DatabaseForm(data, eco, testSettings) { StartPosition = FormStartPosition.Manual, Location = new Point(-5000, -5000), ShowInTaskbar = false };

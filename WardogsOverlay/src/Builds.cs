@@ -82,7 +82,8 @@ static class Builds
     /// Лучшая сборка под приоритет и бюджет. Прицел и магазин — дело вкуса (зум, патроны), их оставляем как есть.
     /// Эффекты обвесов почти независимы (перемножаются), поэтому слоты складываются как рюкзак по цене.
     /// </summary>
-    public static BestBuild? Best(GameData data, Weapon w, List<Attachment> current, Priority p, int? budget)
+    public static BestBuild? Best(GameData data, Weapon w, List<Attachment> current, Priority p, int? budget,
+                                  Dictionary<string, int>? levels = null)
     {
         var keep = current.Where(a => a.SlotKey is "Sight" or "Magazine" or "CantedSight").ToList();
         var slots = w.Slots.Select(s => s == "Pistolgrip" ? "Grip" : s).Distinct()
@@ -90,7 +91,7 @@ static class Builds
         if (slots.Count == 0) return null;
 
         double baseScore = Stats.Score(Stats.Compute(w, keep), p);
-        var options = slots.Select(s => ForSlot(data, w, s)
+        var options = slots.Select(s => ForSlot(data, w, s).Where(a => Unlocked(a.Unlock, levels))
                 .Select(a => (att: (Attachment?)a, price: a.ShopPrice, gain: Stats.Score(Stats.Compute(w, keep.Append(a)), p) - baseScore))
                 .Where(o => o.gain > 0.001)
                 .Prepend((att: (Attachment?)null, price: 0, gain: 0.0))
@@ -174,7 +175,8 @@ static class Builds
         public double Score { get; set; }
     }
 
-    static bool Unlocked(Unlock? u, Dictionary<string, int>? levels) =>
+    /// <summary>Открыт ли предмет при таких уровнях ролей (null — уровни не учитываем).</summary>
+    public static bool Unlocked(Unlock? u, Dictionary<string, int>? levels) =>
         levels == null || u == null || u.Level <= 0 || u.Role == null || u.Role == "None"
         || (levels.TryGetValue(u.Role, out var lvl) && lvl >= u.Level);
 

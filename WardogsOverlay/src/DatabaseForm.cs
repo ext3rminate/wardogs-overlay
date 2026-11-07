@@ -626,15 +626,30 @@ sealed class DatabaseForm : Form
         var page = Page();
         var items = data.Items.Where(i => i.Unlock is { Level: > 0 } && i.Unlock.Role is { } r && r != "None").ToList();
         var chips = new ChipBar { Dock = DockStyle.Top, Items = L.Roles.Select(L.Role).ToArray() };
-        int level = 20;
-        var lvlLabel = Lbl(level.ToString(), 15, 600, mono: true);
+        // У каждой роли свой уровень (карьера и классы качаются независимо) — храним и показываем по роли.
+        var levels = settings?.RoleLevels ?? [];
+        int level = 1;
+        var lvlBox = new TextField { Width = Sc(76), Height = Sc(42), Fill = Theme.Panel };
+        lvlBox.Box.Font = Theme.MonoFont(15, 600);
+        lvlBox.Box.TextAlign = HorizontalAlignment.Center;
+        lvlBox.Margin = new Padding(Sc(6), 0, Sc(6), 0);
         var minus = new UiButton { Kind = ButtonKind.Ghost, Text = "−", Size = new Size(Sc(42), Sc(42)), Font = Theme.UiFont(18) };
         var plus = new UiButton { Kind = ButtonKind.Ghost, Text = "+", Size = new Size(Sc(42), Sc(42)), Font = Theme.UiFont(18) };
-        lvlLabel.Margin = new Padding(Sc(10), Sc(10), Sc(4), 0);
         var stepper = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Bg };
-        var cap = Lbl(L.T("Мой уровень", "My level"), 13, 400, Theme.Muted);
+        var cap = Lbl("", 13, 400, Theme.Muted);
         cap.Margin = new Padding(0, Sc(12), Sc(10), 0);
-        stepper.Controls.AddRange([cap, minus, lvlLabel, plus]);
+        stepper.Controls.AddRange([cap, minus, lvlBox, plus]);
+        bool settingBox = false;
+        void SetLevel(int v, bool save)
+        {
+            level = Math.Clamp(v, 1, 200);
+            settingBox = true;
+            if (lvlBox.Box.Text != level.ToString()) lvlBox.Box.Text = level.ToString();
+            settingBox = false;
+            if (!save) return;
+            levels[L.Roles[chips.SelectedIndex]] = level;
+            settings?.NotifyChanged();
+        }
 
         var timeline = new PaintBox { Dock = DockStyle.Top };
         var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = Theme.Bg };
@@ -650,7 +665,7 @@ sealed class DatabaseForm : Form
             rows = items.Where(i => i.Unlock!.Role == role).GroupBy(i => i.Unlock!.Level).OrderBy(g => g.Key)
                         .Select(g => (g.Key, g.ToList())).ToList();
             timeline.Height = Sc(16) + rows.Sum(r => Sc(20 + 26 * r.Items.Count));
-            lvlLabel.Text = level.ToString();
+            cap.Text = L.T($"Мой уровень · {L.Role(role)}", $"My level · {L.Role(role)}");
             timeline.Invalidate();
             summary.Invalidate();
         }
@@ -721,9 +736,18 @@ sealed class DatabaseForm : Form
                 y += b.S(26);
             }
         };
-        chips.SelectedIndexChanged += (_, _) => Fill();
-        minus.Click += (_, _) => { level = Math.Max(1, level - 1); Fill(); };
-        plus.Click += (_, _) => { level = Math.Min(200, level + 1); Fill(); };
+        chips.SelectedIndexChanged += (_, _) => { SetLevel(levels.GetValueOrDefault(L.Roles[chips.SelectedIndex], 1), save: false); Fill(); };
+        minus.Click += (_, _) => { SetLevel(level - 1, save: true); Fill(); };
+        plus.Click += (_, _) => { SetLevel(level + 1, save: true); Fill(); };
+        lvlBox.Box.TextChanged += (_, _) =>
+        {
+            if (settingBox || !int.TryParse(new string(lvlBox.Box.Text.Where(char.IsAsciiDigit).ToArray()), out var v) || v < 1) return;
+            level = Math.Clamp(v, 1, 200);
+            levels[L.Roles[chips.SelectedIndex]] = level;
+            settings?.NotifyChanged();
+            Fill();
+        };
+        SetLevel(levels.GetValueOrDefault(L.Roles[0], 1), save: false);
 
         scroller.Controls.Add(timeline);
         var body = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -733,7 +757,9 @@ sealed class DatabaseForm : Form
         page.Controls.Add(Gap(16));
         page.Controls.Add(chips);
         page.Controls.Add(Gap(14));
-        page.Controls.Add(Header(L.T("Прогресс", "Progression"), L.T("Что открывается на каждом уровне роли", "What unlocks at each role level"), stepper));
+        page.Controls.Add(Header(L.T("Прогресс", "Progression"),
+            L.T("Что открывается на каждом уровне роли. У карьеры и каждого класса свой уровень — укажи их, и «Сборка под бюджет» будет предлагать только открытое.",
+                "What unlocks at each role level. Career and every class level up separately — set them and Budget loadout will only suggest what you have unlocked."), stepper));
         Fill();
         return page;
     }
@@ -754,11 +780,13 @@ sealed class DatabaseForm : Form
         budget.Box.Font = Theme.MonoFont(20, 600);
         budget.Box.Text = "6 000";
         stack.Controls.Add(budget);
-        var quick = new TableLayoutPanel { ColumnCount = 3, Width = iw, Height = Sc(34), BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, Sc(18)) };
+        var quick = new TableLayoutPanel { ColumnCount = 3, RowCount = 1, Width = iw, Height = Sc(40), BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, Sc(18)) };
         for (int i = 0; i < 3; i++) quick.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3f));
+        // Строка на всю высоту: иначе она растягивается под кнопку (46 по умолчанию) и низ кнопок обрезается.
+        quick.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         foreach (var (v, i) in new[] { (3000, 0), (6000, 1), (10000, 2) })
         {
-            var b = new UiButton { Kind = ButtonKind.Ghost, Text = L.Money(v), Dock = DockStyle.Fill, Font = Theme.MonoFont(12), Margin = new Padding(i == 0 ? 0 : Sc(3), 0, i == 2 ? 0 : Sc(3), 0) };
+            var b = new UiButton { Kind = ButtonKind.Ghost, Text = L.Money(v), Dock = DockStyle.Fill, Height = Sc(40), Font = Theme.MonoFont(12), Margin = new Padding(i == 0 ? 0 : Sc(3), 0, i == 2 ? 0 : Sc(3), 0) };
             b.Click += (_, _) => budget.Box.Text = v.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
             quick.Controls.Add(b, i, 0);
         }
@@ -788,6 +816,33 @@ sealed class DatabaseForm : Form
             m.Show(clsBtn, new Point(0, clsBtn.Height + Sc(4)));
         };
         stack.Controls.Add(clsBtn);
+        // Только открытое: по уровням ролей из «Прогресса».
+        var onlyRow = new TableLayoutPanel { ColumnCount = 2, Width = iw, Height = Sc(30), BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, Sc(4)) };
+        onlyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        onlyRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Sc(48)));
+        var onlyLbl = Lbl(L.T("Только открытое", "Unlocked only"), 13, 500);
+        onlyLbl.Anchor = AnchorStyles.Left;
+        var only = new Toggle { Size = new Size(Sc(44), Sc(26)), Anchor = AnchorStyles.Right, Checked = settings?.OnlyUnlocked ?? true };
+        onlyRow.Controls.Add(onlyLbl, 0, 0);
+        onlyRow.Controls.Add(only, 1, 0);
+        stack.Controls.Add(onlyRow);
+        var levelsHint = Lbl("", 11, 400, Theme.Faint);
+        levelsHint.MaximumSize = new Size(iw, 0);
+        levelsHint.Margin = new Padding(0, 0, 0, Sc(14));
+        stack.Controls.Add(levelsHint);
+        void LevelsHint()
+        {
+            var lv = settings?.RoleLevels ?? [];
+            levelsHint.Text = !only.Checked ? L.T("Предлагаю всё, что есть у продавца.", "Suggesting everything the vendor sells.")
+                : lv.Count == 0 ? L.T("Уровни ролей не заданы — укажи их в «Прогрессе», пока предлагаю всё.", "Role levels are not set — set them in Progression; suggesting everything for now.")
+                : L.T("По уровням: ", "By levels: ") + string.Join(" · ", L.Roles.Where(lv.ContainsKey).Select(r => $"{L.Role(r)} {lv[r]}"));
+        }
+        LevelsHint();
+        only.CheckedChanged += (_, _) =>
+        {
+            if (settings != null) { settings.OnlyUnlocked = only.Checked; settings.NotifyChanged(); }
+            LevelsHint();
+        };
         var find = new UiButton { Kind = ButtonKind.Primary, Text = L.T("Подобрать", "Find"), Width = iw, Height = Sc(46), Margin = new Padding(0, Sc(4), 0, 0) };
         stack.Controls.Add(find);
 
@@ -804,14 +859,27 @@ sealed class DatabaseForm : Form
                 Budget = digits.Length is > 0 and < 9 ? int.Parse(digits) : 0, ArmourLevel = armour.SelectedIndex, EnemyArmour = 2,
                 Sight = (Builds.SightBand)optic.SelectedIndex, Goal = (Builds.LoadoutGoal)goal.SelectedIndex,
                 WeaponClass = cls,
+                Levels = only.Checked ? settings?.UnlockLevels() : null,
             };
-            var list = Builds.BestLoadouts(data, req, 6);
+            LevelsHint();
+            // Броня выбранного уровня ещё не открыта — так и говорим, а не «ничего не влезает».
+            var lockedGear = req.Levels == null || req.ArmourLevel == 0 ? null
+                : new[] { $"level-{req.ArmourLevel}-armor", $"level-{req.ArmourLevel}-helmet" }
+                    .Select(sl => data.Items.FirstOrDefault(i => i.Slug == sl))
+                    .FirstOrDefault(i => i != null && !Builds.Unlocked(i.Unlock, req.Levels));
+            List<Builds.Loadout> list = lockedGear != null ? [] : Builds.BestLoadouts(data, req, 6);
             results.SuspendLayout();
             ClearControls(results);
             int width = Math.Max(Sc(420), results.ClientSize.Width - Sc(36));
             if (list.Count == 0)
             {
-                var none = Lbl(L.T("Ничего не влезает в бюджет. Увеличь бюджет, убери прицел или броню.", "Nothing fits the budget. Raise it or drop the optic/armour."), 14, 400, Theme.Muted);
+                var none = Lbl(lockedGear != null
+                    ? L.T($"{L.Name(lockedGear)} ещё не открыт по твоим уровням ({L.UnlockText(lockedGear.Unlock)}). Выбери броню пониже.",
+                          $"{L.Name(lockedGear)} is not unlocked at your levels ({L.UnlockText(lockedGear.Unlock)}). Pick lower armour.")
+                    : req.Levels != null
+                        ? L.T("Ничего не подходит: не хватает бюджета или нужное ещё не открыто по твоим уровням. Увеличь бюджет, убери прицел или броню.",
+                              "Nothing fits: the budget is too low or what's needed isn't unlocked at your levels. Raise the budget or drop the optic/armour.")
+                        : L.T("Ничего не влезает в бюджет. Увеличь бюджет, убери прицел или броню.", "Nothing fits the budget. Raise it or drop the optic/armour."), 14, 400, Theme.Muted);
                 results.Controls.Add(none);
             }
             double wT = list.Count > 0 ? list.Max(l => l.Ttk ?? 0) : 1, wC = list.Count > 0 ? list.Max(l => l.Climb ?? 0) : 1, wA = list.Count > 0 ? list.Max(l => l.Ads) : 1;
