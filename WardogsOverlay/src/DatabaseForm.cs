@@ -1080,14 +1080,15 @@ sealed class DatabaseForm : Form
                            hintF, Theme.Faint, new RectangleF(x, y, w, b.Height - y - b.S(12)));
                 return;
             }
-            var kinds = new[] { ("attachments", L.T("обвесы", "attachments")), ("weapon", L.T("пушки", "weapons")), ("other", L.T("прочее", "other")) };
+            var kinds = new[] { ("attachments", L.T("обвесы", "attachments")), ("weapon", L.T("пушки", "weapons")),
+                                ("unlock", L.T("открытия", "unlocks")), ("other", L.T("прочее", "other")) };
             float cx = x;
             foreach (var (k, label) in kinds)
             {
                 int sum = list.Where(p => p.Kind == k).Sum(p => p.Amount);
-                Theme.Draw(g, L.Money(sum), bigF, sum > 0 ? Theme.Text : Theme.Faint, new RectangleF(cx, y, w / 3, b.S(28)));
-                Theme.Draw(g, label, hintF, Theme.Faint, new RectangleF(cx, y + b.S(28), w / 3, b.S(18)));
-                cx += w / 3;
+                Theme.Draw(g, L.Money(sum), monoF, sum > 0 ? Theme.Text : Theme.Faint, new RectangleF(cx, y + b.S(4), w / 4, b.S(24)));
+                Theme.Draw(g, label, hintF, Theme.Faint, new RectangleF(cx, y + b.S(28), w / 4, b.S(18)));
+                cx += w / 4;
             }
             y += b.S(56);
             foreach (var p in list.AsEnumerable().Reverse().Take(5))

@@ -16,6 +16,8 @@ sealed class Recognition
     public string Reason = "";
     public Weapon? Weapon;
     public string WeaponText = "";
+    /// <summary>Всё, что OCR прочитал в подписи пушки (даже если название не совпало), — подсказка для картинки.</summary>
+    public List<string> NameTexts = [];
     public List<CellHit> Cells = [];
     public string? SelectedSlot;  // слот выбранной (оранжевой) ячейки
     public int? Balance;          // деньги игрока справа сверху
@@ -361,6 +363,7 @@ sealed class Recognizer(OcrService ocr)
             }
         }
         rec.WeaponText = bestText;
+        rec.NameTexts = texts.Distinct().ToList();
         rec.Trace.Add($"подписи в ячейке: [{string.Join(" | ", texts.Distinct())}] → {best?.Name} ({bestSim:0.00})");
         // Для коротких названий одна ошибка OCR — уже другая пушка (M4 / M14), поэтому строже.
         double need = best != null && bestLen <= 3 ? 0.99 : 0.6;
@@ -405,16 +408,22 @@ sealed class Recognizer(OcrService ocr)
             rec.Trace.Add("  " + string.Join(", ", pool
                 .Select(w => (w.Name, s: icons.Match(f, slot, Allowed, [w], x => x.Icon, IconMatcher.WeaponFits).Score))
                 .OrderByDescending(t => t.s).Take(6).Select(t => $"{t.Name} {t.s:0.00}")));
-        if (best == null || score < 0.5 || score - second < 0.03) { lastIconWeapon = null; return null; }
-        // Похожие силуэты (семейство M4) дают отрыв в сотые доли: такой ответ берём, только если
-        // он повторился на двух кадрах подряд. Ошибка с пушкой испортила бы и все обвесы.
-        bool sure = score - second >= 0.08 || lastIconWeapon == best;
+        // Слабый или пустой кадр (другая вкладка, анимация) не сбрасывает прошлый ответ.
+        if (best == null || score < 0.5 || score - second < 0.03) return null;
+        // Похожие силуэты (семейство M4) дают отрыв в сотые доли. Такой ответ берём, если он повторился
+        // на двух кадрах или если цифры в названии сходятся: OCR читает «M4» как «г,Л4», но «4» в нём есть,
+        // а у M14 цифры другие.
+        bool digitsAgree = DigitsOf(best.Key) is { Length: > 0 } bd && rec.NameTexts.Any(t => DigitsOf(t) == bd);
+        bool sure = score - second >= 0.08 || lastIconWeapon == best || digitsAgree;
+        if (digitsAgree && score - second < 0.08) rec.Trace.Add($"  цифры в подписи сходятся с {best.Name} — беру");
         lastIconWeapon = best;
         if (!sure) rec.Trace.Add("  отрыв мал — жду подтверждения на следующем кадре");
         return sure ? best : null;
     }
 
     Weapon? lastIconWeapon;
+
+    static string DigitsOf(string s) => new(s.Where(char.IsAsciiDigit).ToArray());
 
     /// <summary>Какой движок OCR в прошлый раз нашёл меню (английская игра — английский).</summary>
     bool englishFirst;

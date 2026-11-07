@@ -313,6 +313,18 @@ static class TestMode
         Check("штурмовик 28: M4 доступна", vetList.Any(l => l.Weapon.Slug == "m4"), string.Join(", ", vetList.Select(l => l.Weapon.Name)));
         Check("плашка не режет подбор, пока уровни не заданы", fresh.UnlockLevels() == null && vet.UnlockLevels() != null);
 
+        // Покупки: −$30 000 при магазине AK74 на 60 патронов на экране — это его открытие (реальный случай).
+        var mag60 = data.Attachments.Values.FirstOrDefault(a => a.Name == "AK74 60 RND Magazine");
+        if (mag60 != null)
+        {
+            var (what, kind) = Scanner.Attribute(30000, ak, [mag60], "galil", []);
+            Check("покупка −$30 000 = открытие магазина AK74 на 60", kind == "unlock" && what.Contains(L.Name(mag60)), $"{kind}: {what}");
+            var (w2, k2) = Scanner.Attribute(mag60.ShopPrice, ak, [mag60], "ak74", []);
+            Check("покупка по цене обвеса", k2 == "attachments" && w2 == L.Name(mag60), $"{k2}: {w2}");
+            var (w3, k3) = Scanner.Attribute(77, ak, [mag60], "ak74", [mag60]);
+            Check("непонятная сумма — патроны, броня или снаряжение", k3 == "other", $"{k3}: {w3}");
+        }
+
         var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
         var scope = data.Attachments.Values.Where(a => a.SlotKey == "Sight" && a.Zoom >= 4 && a.Fits?.Count > 0).FirstOrDefault();
         var w4 = scope == null ? null : data.Weapons.FirstOrDefault(w => scope.Fits!.Contains(w.Slug));

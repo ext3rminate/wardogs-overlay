@@ -376,36 +376,60 @@ sealed class Scanner : IDisposable
 
     // Что было у продавца при прошлом показании баланса — чтобы понять, на что ушли деньги.
     int? vendorBalance;
-    int vendorVisit = -1;
     string? vendorWeapon;
     List<Attachment> vendorAtts = [];
 
     /// <summary>
-    /// Баланс упал в том же заходе к продавцу — это покупка. Что именно купили: новая пушка или
-    /// обвесы, которых не было в прошлый раз; иначе — патроны, броня или снаряжение.
+    /// Баланс упал — деньги ушли продавцу (иначе они в игре не убывают). На что: ищем, чья цена или цена
+    /// открытия ровно равна потраченному — среди пушки и обвесов на экране; иначе — обвесы, которых не было
+    /// в прошлый раз; иначе — патроны, броня или снаряжение.
     /// </summary>
     void TrackPurchase(Recognition rec, int balance)
     {
         var now = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList();
-        if (vendorBalance is int prev && vendorVisit == visit && balance < prev && !Economy.IsJump(prev, balance))
+        if (vendorBalance is int prev && balance < prev && !Economy.IsJump(prev, balance))
         {
-            var bought = new List<string>();
-            string kind = "other";
-            if (vendorWeapon != rec.Weapon!.Slug) { bought.Add(L.Name(rec.Weapon)); kind = "weapon"; }
-            else
-                foreach (var a in now.Where(a => vendorAtts.All(x => x.Slug != a.Slug)))
-                {
-                    bought.Add(L.Name(a));
-                    kind = "attachments";
-                }
-            var what = bought.Count > 0 ? string.Join(", ", bought) : L.T("патроны, броня или снаряжение", "ammo, armour or gear");
+            var (what, kind) = Attribute(prev - balance, rec.Weapon!, now, vendorWeapon, vendorAtts);
             Economy.AddPurchase(prev - balance, what, kind);
             Log.Info($"Покупка: −{prev - balance} — {what}");
         }
         vendorBalance = balance;
-        vendorVisit = visit;
         vendorWeapon = rec.Weapon!.Slug;
         vendorAtts = now;
+    }
+
+    internal static (string What, string Kind) Attribute(int spent, Weapon w, List<Attachment> now, string? prevWeapon, List<Attachment> prevAtts)
+    {
+        string open = L.T("открытие: ", "unlock: ");
+        var options = new List<(string What, int Cost, string Kind)>
+        {
+            (L.Name(w), w.Price, "weapon"),
+        };
+        if (w.Unlock is { Cash: > 0 } wu)
+        {
+            options.Add((open + L.Name(w), wu.Cash, "unlock"));
+            options.Add((open + L.Name(w), wu.Cash + w.Price, "unlock"));
+        }
+        foreach (var a in now)
+        {
+            options.Add((L.Name(a), a.ShopPrice, "attachments"));
+            if (a.Unlock is { Cash: > 0 } au)
+            {
+                options.Add((open + L.Name(a), au.Cash, "unlock"));
+                options.Add((open + L.Name(a), au.Cash + a.ShopPrice, "unlock"));
+            }
+        }
+        // Ровно по цене — самое надёжное (цены ячеек на экране и в базе совпадают до доллара).
+        var exact = options.FirstOrDefault(o => o.Cost == spent);
+        if (exact.What != null) return (exact.What, exact.Kind);
+        // Два обвеса разом (быстрые покупки между двумя показаниями баланса).
+        var atts = options.Where(o => o.Kind == "attachments").ToList();
+        for (int i = 0; i < atts.Count; i++)
+            for (int j = i + 1; j < atts.Count; j++)
+                if (atts[i].Cost + atts[j].Cost == spent) return ($"{atts[i].What}, {atts[j].What}", "attachments");
+        var added = prevWeapon == w.Slug ? now.Where(a => prevAtts.All(x => x.Slug != a.Slug)).Select(L.Name).ToList() : [];
+        return added.Count > 0 ? (string.Join(", ", added), "attachments")
+                               : (L.T("патроны, броня или снаряжение", "ammo, armour or gear"), "other");
     }
 
     void SetForeground(bool fg)

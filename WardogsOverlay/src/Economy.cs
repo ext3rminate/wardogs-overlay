@@ -94,7 +94,8 @@ sealed class Economy
             pending = null;
             pts.Add(new MoneyPoint(DateTime.Now, balance));
             if (!history.Contains(Current)) history.Add(Current);
-            if (Environment.TickCount64 - lastSave > 30_000) SaveLocked();
+            // Второе показание — сессия впервые попадает в файл: сохраняем сразу, не дожидаясь 30 с.
+            if (pts.Count == 2 || Environment.TickCount64 - lastSave > 30_000) SaveLocked();
         }
         Changed?.Invoke();
     }
@@ -108,7 +109,7 @@ sealed class Economy
         lock (gate)
         {
             Current.Purchases.Add(new Purchase(DateTime.Now, amount, what, kind));
-            if (Environment.TickCount64 - lastSave > 30_000) SaveLocked();
+            SaveLocked();
         }
         Changed?.Invoke();
     }

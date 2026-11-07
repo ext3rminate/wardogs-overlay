@@ -13,6 +13,8 @@
 - Progression: career and every class have their own saved level (they level up separately); previously one level was shared by all roles and not saved.
 - Budget loadout and the panel's best build suggest only weapons, attachments and armour unlocked at your role levels ("Unlocked only", on by default; roles you have not set count as level 1, exactly as Progression shows them; the panel filters only once levels are set); locked armour is reported explicitly.
 - Fixed the clipped quick-budget buttons on the Budget loadout page.
+- Fixed the M4 (and so its attachments) not being recognized: a small icon margin is accepted when the digits read in the weapon label match ("M4" read as "г,Л4"), and frames from other tabs no longer reset the two-frame confirmation.
+- Purchases are recorded on every vendor balance drop, not only within one attachments-menu visit, and are matched by exact price or unlock cost — unlocks now have their own group. Shooting-range purchases are free and not recorded.
 - First-run window: app language, a game check (found, windowed or full screen) and text recognition languages, and how to use the overlay; reopen it with "Help & game check".
 - "Report a problem" (main window and tray): builds a zip with the log (user folder paths hidden), settings, system info and recent debug snapshots, opens its folder and a prefilled GitHub issue. Nothing is sent automatically.
 - If screen capture stays black for about 20 seconds (exclusive fullscreen), the main window and a tray notification ask to switch the game to Borderless windowed.
@@ -65,6 +67,8 @@
 - «Прогресс»: у карьеры и каждого класса свой сохраняемый уровень (они качаются отдельно); раньше один уровень был общим для всех ролей и не запоминался.
 - «Сборка под бюджет» и подбор на плашке предлагают только пушки, обвесы и броню, открытые по твоим уровням ролей («Только открытое», включено по умолчанию; не заданная роль считается 1-м уровнем — ровно как показывает «Прогресс»; плашка фильтрует, только когда уровни заданы); о закрытой броне пишется прямо.
 - Исправлены обрезанные кнопки быстрого бюджета на странице «Сборка под бюджет».
+- Исправлено: M4 (а значит и её обвесы) не узнавалась — малый отрыв по картинке теперь принимается, если сходятся цифры в подписи («M4» OCR читает как «г,Л4»), а кадры других вкладок больше не сбрасывают подтверждение вторым кадром.
+- Покупки записываются при любом падении баланса у продавца, а не только в пределах одного захода в меню модулей, и определяются по точной цене или цене открытия — у открытий своя группа. На стрельбище всё бесплатно, там покупок нет.
 - Окно первого запуска: язык программы, проверка игры (найдена, в окне или на весь экран) и языков распознавания текста, как пользоваться; открывается снова по ссылке «Помощь и проверка игры».
 - «Сообщить о проблеме» (в главном окне и в трее): архив с журналом (пути с именем пользователя скрыты), настройками, сведениями о системе и последними снимками отладки, открывает папку и заполненную страницу issue на GitHub. Сама программа ничего не отправляет.
 - Если снимок экрана около 20 секунд остаётся чёрным (эксклюзивный полноэкранный режим), главное окно и уведомление в трее просят включить в игре «Оконный без рамки».
