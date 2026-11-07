@@ -303,6 +303,16 @@ static class TestMode
         if (m4?.Unlock is { Level: > 1 } mu)
             Check($"M4 ({L.UnlockText(mu)}) не предлагается, пока роль ниже", lowList.All(l => l.Weapon.Slug != "m4"));
 
+        // Уровни не заданы — «Сборка под бюджет» считает все роли 1-м уровнем (как показывает «Прогресс»).
+        var fresh = new Settings();
+        var reqFresh = new Builds.LoadoutRequest { Budget = 6000, ArmourLevel = 1, Sight = Builds.SightBand.Red, Levels = fresh.EffectiveLevels() };
+        var freshList = Builds.BestLoadouts(data, reqFresh, 6);
+        Check("уровни не заданы: M4 не предлагается", freshList.All(l => l.Weapon.Slug != "m4"), string.Join(", ", freshList.Select(l => l.Weapon.Name)));
+        var vet = new Settings { RoleLevels = new() { ["Infantry"] = 28, ["Career"] = 30 } };
+        var vetList = Builds.BestLoadouts(data, new Builds.LoadoutRequest { Budget = 6000, ArmourLevel = 1, Sight = Builds.SightBand.Red, Levels = vet.EffectiveLevels() }, 10);
+        Check("штурмовик 28: M4 доступна", vetList.Any(l => l.Weapon.Slug == "m4"), string.Join(", ", vetList.Select(l => l.Weapon.Name)));
+        Check("плашка не режет подбор, пока уровни не заданы", fresh.UnlockLevels() == null && vet.UnlockLevels() != null);
+
         var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
         var scope = data.Attachments.Values.Where(a => a.SlotKey == "Sight" && a.Zoom >= 4 && a.Fits?.Count > 0).FirstOrDefault();
         var w4 = scope == null ? null : data.Weapons.FirstOrDefault(w => scope.Fits!.Contains(w.Slug));

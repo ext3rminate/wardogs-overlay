@@ -11,7 +11,7 @@
 - The life-cost line on the panel shows payback time: minutes of play at your average income to earn the build back.
 - Fixed empty space under page headers in the database window.
 - Progression: career and every class have their own saved level (they level up separately); previously one level was shared by all roles and not saved.
-- Budget loadout and the panel's best build suggest only weapons, attachments and armour unlocked at your role levels ("Unlocked only", on by default once levels are set); locked armour is reported explicitly.
+- Budget loadout and the panel's best build suggest only weapons, attachments and armour unlocked at your role levels ("Unlocked only", on by default; roles you have not set count as level 1, exactly as Progression shows them; the panel filters only once levels are set); locked armour is reported explicitly.
 - Fixed the clipped quick-budget buttons on the Budget loadout page.
 - First-run window: app language, a game check (found, windowed or full screen) and text recognition languages, and how to use the overlay; reopen it with "Help & game check".
 - "Report a problem" (main window and tray): builds a zip with the log (user folder paths hidden), settings, system info and recent debug snapshots, opens its folder and a prefilled GitHub issue. Nothing is sent automatically.
@@ -63,7 +63,7 @@
 - В строке цены жизни на плашке — окупаемость: за сколько минут игры при твоём среднем заработке сборка отбивается.
 - Исправлено пустое место под заголовками страниц в окне базы.
 - «Прогресс»: у карьеры и каждого класса свой сохраняемый уровень (они качаются отдельно); раньше один уровень был общим для всех ролей и не запоминался.
-- «Сборка под бюджет» и подбор на плашке предлагают только пушки, обвесы и броню, открытые по твоим уровням ролей («Только открытое», включено, когда уровни заданы); о закрытой броне пишется прямо.
+- «Сборка под бюджет» и подбор на плашке предлагают только пушки, обвесы и броню, открытые по твоим уровням ролей («Только открытое», включено по умолчанию; не заданная роль считается 1-м уровнем — ровно как показывает «Прогресс»; плашка фильтрует, только когда уровни заданы); о закрытой броне пишется прямо.
 - Исправлены обрезанные кнопки быстрого бюджета на странице «Сборка под бюджет».
 - Окно первого запуска: язык программы, проверка игры (найдена, в окне или на весь экран) и языков распознавания текста, как пользоваться; открывается снова по ссылке «Помощь и проверка игры».
 - «Сообщить о проблеме» (в главном окне и в трее): архив с журналом (пути с именем пользователя скрыты), настройками, сведениями о системе и последними снимками отладки, открывает папку и заполненную страницу issue на GitHub. Сама программа ничего не отправляет.

@@ -830,14 +830,16 @@ sealed class DatabaseForm : Form
         levelsHint.MaximumSize = new Size(iw, 0);
         levelsHint.Margin = new Padding(0, 0, 0, Sc(14));
         stack.Controls.Add(levelsHint);
+        // Те же уровни, что видны в «Прогрессе»: не указанная роль — 1-й уровень.
         void LevelsHint()
         {
-            var lv = settings?.RoleLevels ?? [];
-            levelsHint.Text = !only.Checked ? L.T("Предлагаю всё, что есть у продавца.", "Suggesting everything the vendor sells.")
-                : lv.Count == 0 ? L.T("Уровни ролей не заданы — укажи их в «Прогрессе», пока предлагаю всё.", "Role levels are not set — set them in Progression; suggesting everything for now.")
-                : L.T("По уровням: ", "By levels: ") + string.Join(" · ", L.Roles.Where(lv.ContainsKey).Select(r => $"{L.Role(r)} {lv[r]}"));
+            if (!only.Checked || settings == null) { levelsHint.Text = L.T("Предлагаю всё, что есть у продавца.", "Suggesting everything the vendor sells."); return; }
+            var lv = settings.EffectiveLevels();
+            levelsHint.Text = L.T("По уровням: ", "By levels: ") + string.Join(" · ", L.Roles.Select(r => $"{L.Role(r)} {lv[r]}")) +
+                (settings.RoleLevels.Count == 0 ? L.T(". Свои уровни укажи в «Прогрессе».", ". Set your levels in Progression.") : "");
         }
         LevelsHint();
+        page.VisibleChanged += (_, _) => { if (page.Visible) LevelsHint(); };
         only.CheckedChanged += (_, _) =>
         {
             if (settings != null) { settings.OnlyUnlocked = only.Checked; settings.NotifyChanged(); }
@@ -859,7 +861,7 @@ sealed class DatabaseForm : Form
                 Budget = digits.Length is > 0 and < 9 ? int.Parse(digits) : 0, ArmourLevel = armour.SelectedIndex, EnemyArmour = 2,
                 Sight = (Builds.SightBand)optic.SelectedIndex, Goal = (Builds.LoadoutGoal)goal.SelectedIndex,
                 WeaponClass = cls,
-                Levels = only.Checked ? settings?.UnlockLevels() : null,
+                Levels = only.Checked ? settings?.EffectiveLevels() : null,
             };
             LevelsHint();
             // Броня выбранного уровня ещё не открыта — так и говорим, а не «ничего не влезает».

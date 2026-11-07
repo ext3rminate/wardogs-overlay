@@ -47,9 +47,14 @@ sealed class Settings
     /// <summary>Сборка под бюджет и подбор на плашке — только из того, что уже открыто по этим уровням.</summary>
     public bool OnlyUnlocked { get; set; } = true;
 
-    /// <summary>Уровни для фильтра «только открытое» или null, если фильтр выключен или уровни не заданы.</summary>
-    public Dictionary<string, int>? UnlockLevels() =>
-        OnlyUnlocked && RoleLevels.Count > 0 ? L.Roles.ToDictionary(r => r, r => RoleLevels.GetValueOrDefault(r, 1)) : null;
+    /// <summary>Уровни всех ролей так, как их показывает «Прогресс»: не заданная роль — 1-й уровень.</summary>
+    public Dictionary<string, int> EffectiveLevels() => L.Roles.ToDictionary(r => r, r => RoleLevels.GetValueOrDefault(r, 1));
+
+    /// <summary>
+    /// Уровни для подбора на плашке или null. Плашка отсекает закрытое, только если уровни уже указаны
+    /// (иначе у тех, кто их не заполнял, подбор внезапно опустеет); «Сборка под бюджет» берёт EffectiveLevels.
+    /// </summary>
+    public Dictionary<string, int>? UnlockLevels() => OnlyUnlocked && RoleLevels.Count > 0 ? EffectiveLevels() : null;
 
     /// <summary>Цель для накопления (предмет, который хочется открыть) — slug из базы.</summary>
     public string? GoalSlug { get; set; }
