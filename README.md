@@ -11,7 +11,6 @@ An overlay for **Wardogs** with weapon and attachment stats in the build menu, a
 1. Open [Releases](https://github.com/ext3rminate/wardogs-overlay/releases) and download `WardogsOverlay-v…-win-x64.zip`.
 2. Extract the archive to a writable folder. Do not run the application directly from the ZIP.
 3. Run `WardogsOverlay.exe`. Release packages include the .NET Runtime.
-4. Install the Russian language in Windows for text recognition. Set the game interface to Russian and use borderless windowed mode.
 
 Closing the window minimizes the application to the system tray. To quit completely, use the tray icon menu. On first launch, the application downloads data and icons from [MetaForge](https://metaforge.app/wardogs).
 
@@ -94,7 +93,6 @@ Game data and icons are downloaded from MetaForge and are not included in the so
 1. Открой [Releases](https://github.com/ext3rminate/wardogs-overlay/releases) и скачай `WardogsOverlay-v…-win-x64.zip`.
 2. Распакуй архив в отдельную папку с правом записи. Не запускай программу прямо из ZIP.
 3. Запусти `WardogsOverlay.exe`. Релизная сборка включает .NET Runtime.
-4. В Windows установи русский язык для распознавания текста. В игре выбери русский интерфейс и оконный режим без рамки.
 
 Крестик сворачивает приложение в трей. Полный выход — через меню значка рядом с часами. При первом запуске программа скачивает данные и иконки с [MetaForge](https://metaforge.app/wardogs).
 
