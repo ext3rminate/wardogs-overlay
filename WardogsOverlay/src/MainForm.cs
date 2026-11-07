@@ -20,7 +20,9 @@ sealed class MainForm : Form
 
     // Элементы пересоздаются при смене языка и DPI.
     Panel scroll = null!;
-    Segmented segLang = null!, segPrio = null!;
+    Segmented segLang = null!, segPrio = null!, segTarget = null!, segDist = null!, segMine = null!;
+    Toggle tKill = null!, tLife = null!;
+    static readonly int[] KillDistances = [10, 50, 100, 200, 300];
     Toggle tSearch = null!, tOptions = null!, tCompact = null!, tMoney = null!, tHide = null!, tTray = null!, tAuto = null!;
     Label lblUpdVal = null!;
     Label? lblBannerStatus;
@@ -296,6 +298,24 @@ sealed class MainForm : Form
         best.Body.Controls.Add(budgetHint);
         col.Controls.Add(best.Card);
 
+        // --- карточка «Бой и экономика»
+        var fight = CardColumn(inner);
+        fight.Body.Controls.Add(Section(L.T("Бой и экономика на плашке", "Combat & economy on the panel")));
+        tKill = ToggleRow(fight.Body, inner, L.T("Выстрелы до убийства", "Shots to kill"),
+            L.T("Грудь и голова против брони и шлема выбранного уровня, лучший патрон", "Chest and head against the chosen armour and helmet, best ammo"),
+            v => settings.ShowKill = v);
+        string none = L.T("Нет", "None");
+        segTarget = SegRow(fight.Body, inner, L.T("Броня противника", "Enemy armour"), [none, "1", "2", "3", "4"],
+            i => settings.TargetArmour = i);
+        segDist = SegRow(fight.Body, inner, L.T("Дистанция", "Distance"), KillDistances.Select(d => d + L.T(" м", " m")).ToArray(),
+            i => settings.TargetDistance = KillDistances[i]);
+        tLife = ToggleRow(fight.Body, inner, L.T("Цена жизни", "Life cost"),
+            L.T("Что теряешь без реанимации и сколько раз купишь снова", "What you lose without a revive, and how many rebuys you can afford"),
+            v => settings.ShowLifeCost = v);
+        segMine = SegRow(fight.Body, inner, L.T("Моя броня и шлем", "My armour and helmet"), [none, "1", "2", "3", "4"],
+            i => settings.MyArmour = i);
+        col.Controls.Add(fight.Card);
+
         // --- карточка «Обновления»
         var upd = CardColumn(inner);
         upd.Body.Controls.Add(Section(L.T("Обновления", "Updates")));
@@ -410,6 +430,23 @@ sealed class MainForm : Form
         return (s, val);
     }
 
+    /// <summary>Подпись слева, сегменты справа — выбор из нескольких значений в карточке.</summary>
+    Segmented SegRow(FlowLayoutPanel body, int inner, string title, string[] items, Action<int> apply)
+    {
+        int w = inner - Sc(36);
+        var row = new TableLayoutPanel { ColumnCount = 2, Width = w, Height = Sc(50), BackColor = Theme.Panel, Margin = Padding.Empty };
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Sc(56) * items.Length));
+        var l = Lbl(title, 14);
+        l.Anchor = AnchorStyles.Left;
+        row.Controls.Add(l, 0, 0);
+        var seg = new Segmented { Items = items, Size = new Size(Sc(56) * items.Length, Sc(38)), Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+        seg.SelectedIndexChanged += (_, _) => { if (loading || seg.SelectedIndex < 0) return; apply(seg.SelectedIndex); settings.NotifyChanged(); };
+        row.Controls.Add(seg, 1, 0);
+        body.Controls.Add(row);
+        return seg;
+    }
+
     Toggle ToggleRow(FlowLayoutPanel body, int inner, string title, string hint, Action<bool> apply)
     {
         int w = inner - Sc(36);
@@ -500,6 +537,11 @@ sealed class MainForm : Form
         tHide.Checked = settings.HideFromCapture;
         tTray.Checked = settings.StartMinimized;
         tAuto.Checked = settings.AutoUpdate;
+        tKill.Checked = settings.ShowKill;
+        tLife.Checked = settings.ShowLifeCost;
+        segTarget.SelectedIndex = settings.TargetArmour;
+        segMine.SelectedIndex = settings.MyArmour;
+        segDist.SelectedIndex = Math.Max(0, Array.IndexOf(KillDistances, KillDistances.OrderBy(d => Math.Abs(d - settings.TargetDistance)).First()));
         RefreshUpdateUi();
         segPrio.SelectedIndex = settings.BestPriority switch { Priority.Balance => 1, Priority.Recoil => 2, Priority.Handling => 3, _ => 0 };
         if (!budget.Box.Focused) budget.Box.Text = settings.BestBudget > 0 ? settings.BestBudget.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("ru-RU")) : "0";

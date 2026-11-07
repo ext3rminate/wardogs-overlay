@@ -18,8 +18,10 @@ sealed class Weapon
     public int? Damage { get; set; }
     /// <summary>Дробин в выстреле (у дроби 8, у остальных 1).</summary>
     public int Pellets { get; set; } = 1;
-    /// <summary>Поправка патрона против бронежилета, % (у дроби −40, у пули 12 калибра −30).</summary>
-    public double ArmourAmmoPct { get; set; }
+    /// <summary>Ключ калибра в баллистике MetaForge («545mm») — по нему урон, пробитие и патроны в магазине.</summary>
+    public string CalibreKey { get; set; } = "";
+    /// <summary>Падение урона с дистанцией: точки (метры, множитель).</summary>
+    public List<(double Distance, double Mult)> Falloff { get; set; } = [];
     public int? Rpm { get; set; }
     public int? Range { get; set; }
     public int? Velocity { get; set; }
@@ -86,12 +88,20 @@ sealed class DbItem
     public bool InVendor { get; init; }
     public string Description { get; init; } = "";
     public string? Calibre { get; init; }
+    /// <summary>Ключ калибра («545mm»), в отличие от подписи («5.45x39mm»).</summary>
+    public string? CalibreKey { get; init; }
     public string? RoundType { get; init; }
     public int? Amount { get; init; }
 }
 
 /// <summary>Бронежилет или шлем: снижение урона, прочность, что закрывает.</summary>
 sealed record ArmourInfo(string Slot, int Reduction, int Durability, string[] Covers);
+
+/// <summary>Правило урона калибра: модификатор патрона по плоти или против брони/шлема.</summary>
+sealed record DamageRule(string Kind, double Pct, string[] Rounds, string[] Targets);
+
+/// <summary>Калибр: базовый урон, дробины, пробитие по типам патронов («во сколько раз броня гасит сильнее»), правила.</summary>
+sealed record CalibreInfo(double BaseDamage, int Pellets, Dictionary<string, double> Pen, List<DamageRule> Rules);
 
 sealed record PatchChange(string Source, string[] Path, string From, string To);
 
@@ -146,6 +156,8 @@ sealed class GameData
     public string PatchPreviousDate { get; private set; } = "";
     /// <summary>Официальные записи разработчиков в Steam, новые сверху.</summary>
     public List<NewsPost> News { get; } = [];
+    /// <summary>Калибры из баллистики MetaForge по ключу («545mm»).</summary>
+    public Dictionary<string, CalibreInfo> Calibres { get; } = [];
     public string Version { get; private set; } = "";
 
     public static bool IsDownloaded => Files.All(f => File.Exists(JsonPath(f)));
@@ -299,7 +311,7 @@ sealed class GameData
                     Price = Num(it, "price") is double pr ? (int)pr : null,
                     Unlock = unlock, Weight = Num(it, "weight"), InVendor = inVendor,
                     Description = Str(it, "description") ?? "",
-                    Calibre = Str(it, "calibreLabel") ?? Str(it, "calibre"), RoundType = Str(it, "roundType"),
+                    Calibre = Str(it, "calibreLabel") ?? Str(it, "calibre"), CalibreKey = Str(it, "calibre"), RoundType = Str(it, "roundType"),
                     Amount = Num(it, "amount") is double am ? (int)am : null,
                 });
             }
@@ -384,17 +396,20 @@ sealed class GameData
 
     static void ReadBallistics(JsonElement root, GameData gd, Dictionary<string, Weapon> weaponsBySlug)
     {
-        var calDamage = new Dictionary<string, (int Damage, int Pellets, double ArmourPct)>();
         if (root.TryGetProperty("calibres", out var cals) && cals.ValueKind == JsonValueKind.Object)
             foreach (var c in cals.EnumerateObject())
                 if (Num(c.Value, "baseDamage") is double d)
                 {
-                    double armourPct = 0;
-                    if (c.Value.TryGetProperty("rules", out var rules) && rules.ValueKind == JsonValueKind.Array)
-                        foreach (var r in rules.EnumerateArray())
-                            if (Str(r, "kind") == "AmmoModifier" && Arr(r, "tgt").Contains("Armor") && Num(r, "pct") is double pct)
-                                armourPct = pct;
-                    calDamage[c.Name] = ((int)Math.Round(d), Math.Max(1, (int)(Num(c.Value, "pellets") ?? 1)), armourPct);
+                    var rules = new List<DamageRule>();
+                    if (c.Value.TryGetProperty("rules", out var rs) && rs.ValueKind == JsonValueKind.Array)
+                        foreach (var r in rs.EnumerateArray())
+                            if (Num(r, "pct") is double pct)
+                                rules.Add(new DamageRule(Str(r, "kind") ?? "", pct, Arr(r, "rounds"), Arr(r, "tgt").Concat(Arr(r, "targets")).ToArray()));
+                    var pen = new Dictionary<string, double>();
+                    if (c.Value.TryGetProperty("pen", out var pe) && pe.ValueKind == JsonValueKind.Object)
+                        foreach (var p in pe.EnumerateObject())
+                            if (p.Value.ValueKind == JsonValueKind.Number) pen[p.Name] = p.Value.GetDouble();
+                    gd.Calibres[c.Name] = new CalibreInfo(d, Math.Max(1, (int)(Num(c.Value, "pellets") ?? 1)), pen, rules);
                 }
 
         var hitboxes = new Dictionary<string, Dictionary<string, double>>();
@@ -413,7 +428,17 @@ sealed class GameData
                 w.MagSize = Num(b, "magSize") is double ms ? (int)ms : null;
                 w.Moa = Num(b, "accuracyMoa");
                 w.FireModes = Arr(b, "fireModes");
-                if (Str(b, "calibre") is string cal && calDamage.TryGetValue(cal, out var dmg)) (w.Damage, w.Pellets, w.ArmourAmmoPct) = dmg;
+                if (Str(b, "calibre") is string cal && gd.Calibres.TryGetValue(cal, out var ci))
+                {
+                    w.CalibreKey = cal;
+                    w.Damage = (int)Math.Round(ci.BaseDamage);
+                    w.Pellets = ci.Pellets;
+                }
+                if (b.TryGetProperty("falloff", out var fo) && fo.ValueKind == JsonValueKind.Array)
+                    foreach (var pt in fo.EnumerateArray())
+                        if (pt.ValueKind == JsonValueKind.Array && pt.GetArrayLength() >= 2 &&
+                            pt[0].ValueKind == JsonValueKind.Number && pt[1].ValueKind == JsonValueKind.Number)
+                            w.Falloff.Add((pt[0].GetDouble(), pt[1].GetDouble()));
                 var cls = Str(b, "weaponClass") ?? w.Sub;
                 if (hitboxes.TryGetValue(cls, out var hit) || hitboxes.TryGetValue(w.Sub, out hit)) w.Hit = hit;
                 if (b.TryGetProperty("recoilPattern", out var rp) && rp.ValueKind == JsonValueKind.Array)

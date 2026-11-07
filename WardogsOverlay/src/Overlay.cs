@@ -21,6 +21,41 @@ sealed class OverlayModel
     public bool Compact { get; init; }
     /// <summary>Строка экономики: «сессия +$12 400 · $830/мин».</summary>
     public string? Money { get; set; }
+    /// <summary>Подпись «броня 2, 50 м» и значения «грудь 7 · 0,61 с · голова 3 · FMJ».</summary>
+    public (string Where, string What)? Kill { get; init; }
+    /// <summary>Сколько стоит эта сборка с бронёй — столько теряешь при смерти без реанимации.</summary>
+    public int? LifeCost { get; init; }
+    /// <summary>«≈ $6 115 · запас 53», и красным, если жизней на балансе меньше трёх.</summary>
+    public string? Life { get; set; }
+    public bool LifeWarn { get; set; }
+
+    /// <summary>Короткая оценка для плашки: грудь и голова против брони и шлема одного уровня, лучший патрон.</summary>
+    public static (string Where, string What)? KillLine(GameData data, Weapon w, int armour, int distance)
+    {
+        var loads = new[] { RoundLoad.FMJ, RoundLoad.HollowPoint, RoundLoad.ArmorPiercing };
+        var chest = loads.Select(l => (l, k: Combat.Shots(data, w, "torso_upper", l, armour, armour, distance))).Where(t => t.k != null).ToList();
+        if (chest.Count == 0) return null;
+        var best = chest.OrderBy(t => t.k!.Seconds).ThenBy(t => Combat.MagazineCost(data, w, t.l) ?? int.MaxValue).First();
+        // Тот же результат дешевле — это и есть «лучше».
+        var fmj = chest.FirstOrDefault(t => t.l == RoundLoad.FMJ);
+        if (fmj.k != null && fmj.k.Shots == best.k!.Shots) best = fmj;
+        var head = Combat.Shots(data, w, "head", best.l, armour, armour, distance);
+        string name = best.l switch { RoundLoad.HollowPoint => "HP", RoundLoad.ArmorPiercing => "AP", _ => "FMJ" };
+        var where = (armour == 0 ? L.T("без брони", "no armour") : L.T($"броня {armour}", $"armour {armour}")) + L.T($", {distance} м", $", {distance} m");
+        var s = L.T($"грудь {best.k!.Shots} · {Combat.Seconds(best.k.Seconds)}", $"chest {best.k!.Shots} · {Combat.Seconds(best.k.Seconds)}");
+        if (head != null) s += L.T($" · голова {head.Shots}", $" · head {head.Shots}");
+        if (chest.Count > 1) s += " · " + name;
+        return (where, s);
+    }
+
+    /// <summary>Пушка + обвесы + бронежилет и шлем своего уровня по ценам продавца.</summary>
+    public static int LifeCostOf(GameData data, Weapon w, List<Attachment> atts, int armour)
+    {
+        int Price(string slug) => data.Items.FirstOrDefault(i => i.Slug == slug)?.Price ?? 0;
+        int cost = w.Price + atts.Sum(a => a.ShopPrice);
+        if (armour > 0) cost += Price($"level-{armour}-armor") + Price($"level-{armour}-helmet");
+        return cost;
+    }
 
     public static OverlayModel Build(Weapon w, List<CellHit> cells, List<Attachment>? snapshot,
                                      GameData? data = null, string? selectedSlot = null, Settings? s = null)
@@ -53,8 +88,18 @@ sealed class OverlayModel
                 best = Builds.Best(data, w, atts, p, s.BestBudget > 0 ? s.BestBudget : null);
         }
 
+        (string, string)? kill = null;
+        int? lifeCost = null;
+        if (data != null && s != null)
+        {
+            if (s.ShowKill) kill = KillLine(data, w, s.TargetArmour, s.TargetDistance);
+            if (s.ShowLifeCost) lifeCost = LifeCostOf(data, w, atts, s.MyArmour);
+        }
+
         return new OverlayModel
         {
+            Kill = kill,
+            LifeCost = lifeCost,
             Weapon = w,
             Now = Stats.Compute(w, atts),
             Before = snapshot != null ? Stats.Compute(w, snapshot) : null,
@@ -113,7 +158,8 @@ static class OverlayRenderer
         if (m.Options != null) h += 1 + 12 + 24 + 20 + m.Options.Rows.Count * OptH + 10;
         if (m.Best != null)
             h += 1 + 12 + 24 + Math.Max(1, BestItems(m).Count() + BestRemoved(m).Count()) * BestItemH + 8 + Math.Max(1, BestRows(m).Count) * BestRowH + 10;
-        h += 1 + 10 + (m.Money != null ? 22 : 0) + 18 + 14;
+        h += 1 + 10 + (m.Money != null ? 22 : 0) + (m.Life != null ? 22 : 0) + 18 + 14;
+        if (m.Kill != null) h += 26;
         if (m.MoveMode) h += 22;
         return new Size((int)Math.Ceiling(Width(m) * u), (int)Math.Ceiling(h * u));
     }
@@ -180,6 +226,13 @@ static class OverlayRenderer
             cx += cw + 6;
         }
         y += 24 + 14;
+        if (m.Kill != null)
+        {
+            var (where, what) = m.Kill.Value;
+            Txt(where, fMoney, Muted, x0, y - 6, inner, 22);
+            Txt(what, fMoney, Ui.Theme.TextSoft, x0, y - 6, inner, 22, Ui.Theme.Align.Right);
+            y += 26;
+        }
 
         // --- обвесы
         y += 4;
@@ -306,6 +359,12 @@ static class OverlayRenderer
             Txt(L.T("сессия", "session"), fMoney, Muted, x0, y, inner, 20);
             var money = m.Money.Replace(L.T("сессия ", "session "), "");
             Txt(money, fMoney, money.StartsWith('−') ? Ui.Theme.BadText : Good, x0, y, inner, 20, Ui.Theme.Align.Right);
+            y += 22;
+        }
+        if (m.Life != null)
+        {
+            Txt(L.T("цена жизни", "life cost"), fMoney, Muted, x0, y, inner, 20);
+            Txt(m.Life, fMoney, m.LifeWarn ? Ui.Theme.BadText : Ui.Theme.TextSoft, x0, y, inner, 20, Ui.Theme.Align.Right);
             y += 22;
         }
         float hx = x0;

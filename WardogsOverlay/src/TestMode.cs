@@ -33,7 +33,7 @@ static class TestMode
             using var ov = new OverlayForm(st);
             using var mf = new MainForm(st, ov) { Preview = true, StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
             mf.Show();
-            if (files.Contains("--tall")) mf.Height = 2400; // всё окно целиком, без прокрутки
+            if (files.Contains("--tall")) mf.Height = 4200; // всё окно целиком, без прокрутки
             var until = Environment.TickCount64 + 600;
             while (Environment.TickCount64 < until) { Application.DoEvents(); Thread.Sleep(10); }
             using var bmp = new Bitmap(mf.Width, mf.Height);
@@ -235,7 +235,34 @@ static class TestMode
         var data = GameData.Load();
         var m500 = data.Weapons.FirstOrDefault(w => w.Pellets > 1);
         Check("у дробовика 8 дробин", m500 != null && m500.Pellets == 8, m500 == null ? "нет" : $"{m500.Name} ×{m500.Pellets}");
-        if (m500 != null && Combat.TtkChest(m500, 0) is { } ttk) Check("дробовик без брони убивает за 1–2 выстрела", ttk.Shots <= 2, $"{ttk.Shots}");
+        if (m500 != null && Combat.TtkChest(data, m500, 0) is { } ttk) Check("дробовик без брони убивает за 1–2 выстрела", ttk.Shots <= 2, $"{ttk.Shots}");
+
+        // Модель урона сверена с калькулятором MetaForge (верх груди / голова, 50 м).
+        var ak = data.Weapons.First(w => w.Slug == "ak74");
+        int S(Weapon w, string zone, RoundLoad load, int body, int helmet) => Combat.Shots(data, w, zone, load, body, helmet, 50)?.Shots ?? -1;
+        var akTorso = new[] { 0, 1, 2, 3, 4 }.Select(l => S(ak, "torso_upper", RoundLoad.FMJ, l, 0)).ToArray();
+        Check("AK74 в верх груди, броня 0–4: 4/6/7/8/10 выстрелов", akTorso.SequenceEqual([4, 6, 7, 8, 10]), string.Join("/", akTorso));
+        Check("AK74 броня 2: HP 19, AP 7", S(ak, "torso_upper", RoundLoad.HollowPoint, 2, 0) == 19 && S(ak, "torso_upper", RoundLoad.ArmorPiercing, 2, 0) == 7,
+              $"HP {S(ak, "torso_upper", RoundLoad.HollowPoint, 2, 0)}, AP {S(ak, "torso_upper", RoundLoad.ArmorPiercing, 2, 0)}");
+        Check("AK74 в голову, шлем 2: FMJ 3, HP 12, AP 3",
+              S(ak, "head", RoundLoad.FMJ, 2, 2) == 3 && S(ak, "head", RoundLoad.HollowPoint, 2, 2) == 12 && S(ak, "head", RoundLoad.ArmorPiercing, 2, 2) == 3,
+              $"{S(ak, "head", RoundLoad.FMJ, 2, 2)}/{S(ak, "head", RoundLoad.HollowPoint, 2, 2)}/{S(ak, "head", RoundLoad.ArmorPiercing, 2, 2)}");
+        Check("AK74 HP в шею (не закрыта шлемом 2): 2 выстрела", S(ak, "neck", RoundLoad.HollowPoint, 2, 2) == 2);
+        var akTtk = Combat.Shots(data, ak, "torso_upper", RoundLoad.FMJ, 2, 0, 50)?.Seconds ?? 0;
+        Check("AK74 броня 2, 50 м: 0,61 с с полётом пули", Math.Abs(akTtk - 0.61) < 0.01, akTtk.ToString("0.000"));
+        if (m500 != null)
+        {
+            var mt = new[] { 0, 1, 2, 3, 4 }.Select(l => S(m500, "torso_upper", RoundLoad.FMJ, l, 0)).ToArray();
+            Check("M500 в верх груди, броня 0–4: 1/2/2/2/4", mt.SequenceEqual([1, 2, 2, 2, 4]), string.Join("/", mt));
+        }
+        Check("магазин AK74: FMJ дешевле AP", Combat.MagazineCost(data, ak, RoundLoad.FMJ) < Combat.MagazineCost(data, ak, RoundLoad.ArmorPiercing),
+              $"{Combat.MagazineCost(data, ak, RoundLoad.FMJ)} / {Combat.MagazineCost(data, ak, RoundLoad.ArmorPiercing)}");
+
+        int ArmourPrice(string slug) => data.Items.FirstOrDefault(i => i.Slug == slug)?.Price ?? 0;
+        int life = OverlayModel.LifeCostOf(data, ak, [], 2);
+        Check("цена жизни: пушка + броня и шлем 2 ур.", life == ak.Price + ArmourPrice("level-2-armor") + ArmourPrice("level-2-helmet") && life > ak.Price, L.Money(life));
+        var kl = OverlayModel.KillLine(data, ak, 2, 50);
+        Check("строка плашки про убийство", kl?.What.Contains("7") == true, kl is { } x ? $"{x.Where}: {x.What}" : "null");
 
         var canted = data.Attachments.Values.FirstOrDefault(a => a.SlotKey == "CantedSight" && a.Zoom != null);
         var scope = data.Attachments.Values.Where(a => a.SlotKey == "Sight" && a.Zoom >= 4 && a.Fits?.Count > 0).FirstOrDefault();
@@ -247,9 +274,9 @@ static class TestMode
             Check("боковой прицел не перебивает зум основного", Math.Abs(zoom - scope.Zoom!.Value) < 1e-6, $"{zoom} при {scope.Zoom}");
         }
 
-        var ak = data.Weapons.First(w => w.Slots.Length > 2);
+        var many = data.Weapons.First(w => w.Slots.Length > 2);
         var sw = Stopwatch.StartNew();
-        var best = Builds.Best(data, ak, [], Priority.Balance, 9_999_999);
+        var best = Builds.Best(data, many, [], Priority.Balance, 9_999_999);
         Check("подбор с бюджетом 9 999 999 быстрый", sw.ElapsedMilliseconds < 500, $"{sw.ElapsedMilliseconds} мс, {best?.Atts.Count ?? 0} обвесов");
 
         Console.WriteLine(fails == 0 ? "всё ок" : $"провалов: {fails}");

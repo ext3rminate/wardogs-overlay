@@ -206,7 +206,6 @@ static class Builds
         int gear = (armour?.Price ?? 0) + (helmet?.Price ?? 0);
         int left0 = r.Budget - gear;
         if (left0 <= 0) return [];
-        int enemyReduction = Combat.ArmourReduction(data, r.EnemyArmour);
         var priority = r.Goal switch { LoadoutGoal.Recoil => Priority.Recoil, LoadoutGoal.Handling => Priority.Handling, _ => Priority.Balance };
 
         var list = new List<Loadout>();
@@ -232,7 +231,7 @@ static class Builds
             var best = BestWithFilter(data, w, keep, priority, left, a => Unlocked(a.Unlock, r.Levels));
             var atts = best?.Atts ?? keep;
             var stats = Stats.Compute(w, atts);
-            var ttk = Combat.TtkChest(w, enemyReduction);
+            var ttk = Combat.TtkChest(data, w, r.EnemyArmour);
             list.Add(new Loadout
             {
                 Weapon = w, Atts = atts, Armour = armour, Helmet = helmet, Stats = stats,

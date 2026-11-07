@@ -27,6 +27,8 @@ Database window (open it from the main window or the tray menu)
   Attachments    — percentage effects, compatible weapons, and slot/weapon filters.
   Armour         — damage reduction, durability, and protected body zones.
   Ammo           — calibres, ammunition types, and price per 10 rounds.
+  Combat         — shots and time to kill by zone, armour, helmet, distance and FMJ/HP/AP,
+                   magazine cost and which ammo to buy against that armour.
   Progression    — role level unlocks; set your level to highlight upcoming items.
   Budget loadout — weapon, optic of the chosen magnification, attachments, and armour
                    within the selected budget.
@@ -123,6 +125,8 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
   Обвесы      — эффекты в процентах, к каким пушкам подходят, фильтр по слоту и пушке.
   Броня       — снижение урона, прочность, какие зоны закрывает.
   Патроны     — калибры и типы, цена за 10 шт.
+  Бой         — выстрелы и время до убийства по зоне, броне, шлему, дистанции и патронам FMJ/HP/AP,
+                цена магазина и какие патроны брать против такой брони.
   Прогресс    — что открывается на каком уровне роли; укажи свой уровень — подсвечу ближайшее.
   Сборка под бюджет — пушка + прицел нужной кратности + обвесы + броня в заданную сумму.
   Экономика   — заработок, график баланса, история сессий.

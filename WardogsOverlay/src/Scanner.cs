@@ -274,6 +274,21 @@ sealed class Scanner : IDisposable
         }
         var model = OverlayModel.Build(rec.Weapon!, rec.Cells, snap, recognizer.Data, rec.SelectedSlot, settings);
         if (settings.ShowMoney && Economy.Current.Points.Count > 0) model.Money = Economy.Summary();
+        if (model.LifeCost is int life && life > 0)
+        {
+            // Запас жизней: сколько раз можно купить такую же сборку на текущий баланс.
+            var pts = Economy.Current.Points;
+            // На стрельбище баланс ненастоящий ($10 000) — там берём последний баланс у продавца.
+            int? balance = rec.Cells.Any(c => c.Price > 0) ? rec.Balance : null;
+            balance ??= pts.Count > 0 ? pts[^1].Balance : null;
+            model.Life = "≈ " + L.Money(life);
+            if (balance is int b)
+            {
+                int lives = b / life;
+                model.Life += L.T($" · запас {lives}", $" · {lives} in reserve");
+                model.LifeWarn = lives < 3;
+            }
+        }
         float u = (float)(client.H / 1080.0 * settings.OverlayScale);
         int x = client.X + rec.AnchorX + settings.OverlayOffsetX;
         int y = client.Y + rec.AnchorY + settings.OverlayOffsetY;

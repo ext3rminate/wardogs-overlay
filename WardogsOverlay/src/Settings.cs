@@ -32,6 +32,13 @@ sealed class Settings
     public bool CompactMode { get; set; }
     /// <summary>Строка экономики (заработок за сессию) внизу плашки.</summary>
     public bool ShowMoney { get; set; } = true;
+    /// <summary>Строка «сколько выстрелов до убийства» на плашке и против какой брони/дистанции её считать.</summary>
+    public bool ShowKill { get; set; } = true;
+    public int TargetArmour { get; set; } = 2;
+    public int TargetDistance { get; set; } = 50;
+    /// <summary>Цена жизни (что теряешь при смерти без реанимации) и запас жизней по балансу.</summary>
+    public bool ShowLifeCost { get; set; } = true;
+    public int MyArmour { get; set; } = 2;
     /// <summary>Ставить новые версии с GitHub самому (когда игра не на переднем плане). Выключено — только предлагать.</summary>
     public bool AutoUpdate { get; set; } = true;
     /// <summary>Версия, которую попросили не предлагать («Пропустить»).</summary>
@@ -93,6 +100,9 @@ sealed class Settings
         OverlayScale = double.IsFinite(OverlayScale) ? Math.Clamp(OverlayScale, 0.5, 3) : 1;
         Opacity = double.IsFinite(Opacity) ? Math.Clamp(Opacity, 0.2, 1) : 0.94;
         SlotOptionsMax = Math.Clamp(SlotOptionsMax, 1, 20);
+        TargetArmour = Math.Clamp(TargetArmour, 0, 4);
+        MyArmour = Math.Clamp(MyArmour, 0, 4);
+        TargetDistance = Math.Clamp(TargetDistance, 5, 1000);
         BestBudget = Math.Clamp(BestBudget, 0, 9_999_999);
         ScanIntervalMs = Math.Clamp(ScanIntervalMs, 200, 10_000);
         IdleAfterMs = Math.Clamp(IdleAfterMs, 1000, 600_000);

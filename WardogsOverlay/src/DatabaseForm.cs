@@ -14,8 +14,8 @@ sealed class DatabaseForm : Form
     readonly Economy economy;
     readonly NavRail rail = new();
     readonly Panel host = new();
-    readonly Control?[] pages = new Control?[8];
-    static readonly string[] Keys = ["weapons", "attachments", "armour", "ammo", "progress", "loadout", "economy", "patch"];
+    readonly Control?[] pages = new Control?[Keys.Length];
+    static readonly string[] Keys = ["weapons", "attachments", "armour", "ammo", "combat", "progress", "loadout", "economy", "patch"];
     Action? economyRefresh;
 
     float D => DeviceDpi / 96f;
@@ -57,6 +57,7 @@ sealed class DatabaseForm : Form
         [
             new(L.T("Пушки", "Weapons"), IconKind.Crosshair), new(L.T("Обвесы", "Attachments"), IconKind.Sliders),
             new(L.T("Броня", "Armour"), IconKind.Shield), new(L.T("Патроны", "Ammo"), IconKind.Bullet),
+            new(L.T("Бой: урон и TTK", "Combat: damage & TTK"), IconKind.Crosshair),
             new(L.T("Прогресс", "Progression"), IconKind.Steps), new(L.T("Сборка под бюджет", "Budget loadout"), IconKind.Layers),
             new(L.T("Экономика", "Economy"), IconKind.Chart), new(L.T("Патч", "Patch"), IconKind.Doc),
         ];
@@ -113,7 +114,7 @@ sealed class DatabaseForm : Form
         pages[i] ??= i switch
         {
             0 => WeaponsPage(), 1 => AttachmentsPage(), 2 => ArmourPage(), 3 => AmmoPage(),
-            4 => ProgressPage(), 5 => LoadoutPage(), 6 => EconomyPage(), _ => PatchPage(),
+            4 => CombatPage(), 5 => ProgressPage(), 6 => LoadoutPage(), 7 => EconomyPage(), _ => PatchPage(),
         };
         host.SuspendLayout();
         host.Controls.Clear();
@@ -216,7 +217,6 @@ sealed class DatabaseForm : Form
     Control WeaponsPage()
     {
         var page = Page();
-        int reduction = Combat.ArmourReduction(data, 2);
         var grid = new StyledGrid();
         grid.AddCol(L.T("Пушка", "Weapon"), 2.4f, right: false, min: 240);
         grid.AddCol(L.T("Урон", "Dmg"), 0.6f); grid.AddCol(L.T("В/мин", "RPM"), 0.6f); grid.AddCol(L.T("Дальн", "Range"), 0.6f);
@@ -240,7 +240,7 @@ sealed class DatabaseForm : Form
             {
                 if (chips.SelectedIndex > 0 && w.Sub != classes[chips.SelectedIndex - 1]) continue;
                 if (!Match(search.Box.Text, w.Name, L.Name(w))) continue;
-                var ttk = Combat.TtkChest(w, reduction);
+                var ttk = Combat.TtkChest(data, w, 2);
                 object? t = ttk is { } x ? new Tinted(x.Seconds, Combat.Seconds(x.Seconds), x.Seconds <= 0.3 ? Theme.Good : x.Seconds >= 0.53 ? Theme.BadText : Theme.Text) : null;
                 int i = grid.Rows.Add(new TwoLine(L.Name(w), Stats.ClassName(w.Sub)), w.Damage, w.Rpm, w.Range, w.Velocity,
                     w.Attr.GetValueOrDefault("AimTime").ToString("0.00"), w.Climb10?.ToString("0.0"), ttk?.Shots, t,
@@ -286,7 +286,6 @@ sealed class DatabaseForm : Form
             MessageBox.Show(this, L.T("Выдели в таблице 2–4 пушки (Ctrl + клик).", "Select 2–4 weapons in the table (Ctrl + click)."), Text);
             return;
         }
-        int red = Combat.ArmourReduction(data, 2);
         var metrics = new List<(string Name, Func<Weapon, double?> Get, bool LowerBetter, string Fmt)>
         {
             (L.T("Урон", "Damage"), w => w.Damage, false, "0"),
@@ -298,9 +297,9 @@ sealed class DatabaseForm : Form
             (L.T("Скорость доставания", "Equip speed"), w => w.Attr.GetValueOrDefault("EquipSpeedMultiplier", 1), false, "0.00×"),
             (L.T("Подброс за 10 выстрелов, °", "Climb over 10 rounds, °"), w => w.Climb10, true, "0.0"),
             (L.T("Увод вбок за 10 выстрелов, °", "Drift over 10 rounds, °"), w => w.Drift10, true, "0.00"),
-            (L.T("Выстрелов в грудь (без брони)", "Chest shots (no armour)"), w => Combat.TtkChest(w, 0)?.Shots, true, "0"),
-            (L.T("Выстрелов в грудь (броня 2)", "Chest shots (armour 2)"), w => Combat.TtkChest(w, red)?.Shots, true, "0"),
-            (L.T("Время убийства (броня 2), с", "TTK (armour 2), s"), w => Combat.TtkChest(w, red)?.Seconds, true, "0.00"),
+            (L.T("Выстрелов в грудь (без брони)", "Chest shots (no armour)"), w => Combat.TtkChest(data, w, 0)?.Shots, true, "0"),
+            (L.T("Выстрелов в грудь (броня 2)", "Chest shots (armour 2)"), w => Combat.TtkChest(data, w, 2)?.Shots, true, "0"),
+            (L.T("Время убийства (броня 2), с", "TTK (armour 2), s"), w => Combat.TtkChest(data, w, 2)?.Seconds, true, "0.00"),
             (L.T("Множитель в голову", "Head multiplier"), w => w.Hit.GetValueOrDefault("head"), false, "0.00×"),
             (L.T("Магазин", "Magazine"), w => w.MagSize, false, "0"),
             (L.T("Цена", "Price"), w => w.Price > 0 ? w.Price : null, true, "$#,0"),
@@ -999,6 +998,187 @@ sealed class DatabaseForm : Form
                 "Balance is read from the vendor screen. Growth between visits is income, drops are purchases"), newSession));
         Refresh();
         return page;
+    }
+
+    // ---------- бой ----------
+
+    static readonly RoundLoad[] AllLoads = [RoundLoad.FMJ, RoundLoad.HollowPoint, RoundLoad.ArmorPiercing];
+    static string LoadName(RoundLoad l) => l switch
+    {
+        RoundLoad.HollowPoint => L.T("HP · по плоти", "HP · flesh"),
+        RoundLoad.ArmorPiercing => L.T("AP · бронебойные", "AP · armour-piercing"),
+        _ => L.T("FMJ · обычные", "FMJ · standard"),
+    };
+    static string LoadShort(RoundLoad l) => l switch { RoundLoad.HollowPoint => "HP", RoundLoad.ArmorPiercing => "AP", _ => "FMJ" };
+
+    /// <summary>
+    /// Калькулятор: сколько выстрелов и времени до убийства по зоне, броне, шлему, дистанции и патронам —
+    /// и какие патроны выгоднее брать против такой брони (с ценой магазина).
+    /// </summary>
+    Control CombatPage()
+    {
+        var page = Page();
+        var weapons = data.Weapons.Where(w => w.InVendor && w.Rpm != null && w.Sub != "Launcher" && w.CalibreKey.Length > 0)
+                                  .OrderBy(w => L.Name(w)).ToList();
+        // По умолчанию — последняя пушка, которую оверлей видел в меню.
+        var weapon = settings?.MyWeapons.Select(s => weapons.FirstOrDefault(w => w.Slug == s)).LastOrDefault(w => w != null)
+                     ?? weapons.FirstOrDefault(w => w.Slug == "ak74") ?? weapons.FirstOrDefault();
+        if (weapon == null) { page.Controls.Add(Header(L.T("Бой", "Combat"), L.T("В базе нет баллистики.", "No ballistics in the data."))); return page; }
+
+        var zones = new[] { ("head", L.T("Голова", "Head")), ("neck", L.T("Шея", "Neck")), ("torso_upper", L.T("Грудь", "Chest")),
+                            ("torso_lower", L.T("Живот", "Stomach")), ("arm_upper", L.T("Руки", "Arms")), ("leg_thigh", L.T("Ноги", "Legs")) };
+        int[] dists = [10, 50, 100, 200, 300, 500];
+        var pick = new UiButton { Kind = ButtonKind.Secondary, Height = Sc(42), Font = Theme.UiFont(14, 500) };
+        Segmented Seg(string[] items, int sel, int width) =>
+            new() { Items = items, SelectedIndex = sel, Size = new Size(Sc(width), Sc(40)), Well = Theme.Panel, Margin = new Padding(0, Sc(4), Sc(18), 0) };
+        string none = L.T("Нет", "None");
+        var segBody = Seg([none, "1", "2", "3", "4"], 2, 250);
+        var segHelmet = Seg([none, "1", "2", "3", "4"], 2, 250);
+        var segDist = Seg(dists.Select(d => d + L.T(" м", " m")).ToArray(), 1, 400);
+        var segZone = Seg(zones.Select(z => z.Item2).ToArray(), 2, 520);
+
+        var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, BackColor = Theme.Bg };
+        void Group(string caption, Control c)
+        {
+            var g = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, Sc(10)) };
+            g.Controls.Add(Lbl(caption.ToUpperInvariant(), 11, 600, Theme.Faint));
+            g.Controls.Add(c);
+            controls.Controls.Add(g);
+        }
+        Group(L.T("Бронежилет цели", "Target body armour"), segBody);
+        Group(L.T("Шлем цели", "Target helmet"), segHelmet);
+        Group(L.T("Дистанция", "Distance"), segDist);
+        Group(L.T("Куда попадаешь", "Hit zone"), segZone);
+
+        // Три карточки патронов + совет.
+        var cards = new PaintBox { Dock = DockStyle.Top, Height = Sc(200) };
+        var advice = Lbl("", 14, 500, Theme.Text);
+        advice.Dock = DockStyle.Top;
+        advice.Padding = new Padding(Sc(2), Sc(10), 0, Sc(6));
+        var grid = new StyledGrid();
+        grid.AddCol(L.T("Зона", "Zone"), 1.4f, right: false, min: 150);
+        foreach (var l in AllLoads) grid.AddCol(LoadShort(l), 1f);
+
+        var bigF = Theme.MonoFont(28, 700); var secF = Theme.MonoFont(15, 600); var capF = Theme.UiFont(13, 600);
+        var smallF = Theme.UiFont(12); var badgeF = Theme.MonoFont(10, 600);
+        List<(RoundLoad Load, Kill? Kill, int? Mag, DbItem? Item)> results = [];
+
+        void Recalc()
+        {
+            int body = segBody.SelectedIndex, helmet = segHelmet.SelectedIndex;
+            double dist = dists[Math.Max(0, segDist.SelectedIndex)];
+            string zone = zones[Math.Max(0, segZone.SelectedIndex)].Item1;
+            pick.Text = L.Name(weapon) + "  ▾";
+            pick.Width = pick.PreferredWidth(DeviceDpi);
+            results = AllLoads.Select(l => (l, Combat.Shots(data, weapon, zone, l, body, helmet, dist), Combat.MagazineCost(data, weapon, l), Combat.AmmoItem(data, weapon, l))).ToList();
+            advice.Text = Advice(results, body, zone, helmet);
+            cards.Invalidate();
+
+            grid.Rows.Clear();
+            foreach (var z in Combat.Zones)
+            {
+                var kills = AllLoads.Select(l => Combat.Shots(data, weapon, z, l, body, helmet, dist)).ToArray();
+                double best = kills.Where(k => k != null).Select(k => k!.Seconds).DefaultIfEmpty(double.MaxValue).Min();
+                var zn = L.Zone(z);
+                var row = new List<object?> { char.ToUpper(zn[0]) + zn[1..] };
+                row.AddRange(kills.Select(k => (object?)(k == null ? "—"
+                    : new Tinted(k.Seconds, $"{k.Shots} · {Combat.Seconds(k.Seconds)}", Math.Abs(k.Seconds - best) < 1e-9 ? Theme.Good : Theme.Text))));
+                grid.Rows.Add(row.ToArray());
+            }
+        }
+
+        cards.Painter = (g, b) =>
+        {
+            g.Clear(Theme.Bg);
+            if (results.Count == 0) return;
+            var ok = results.Where(r => r.Kill != null).ToList();
+            var bestLoad = ok.OrderBy(r => r.Kill!.Seconds).ThenBy(r => r.Mag ?? int.MaxValue).Select(r => (RoundLoad?)r.Load).FirstOrDefault();
+            float gap = b.S(14), w = (b.Width - 2 * gap) / 3f;
+            for (int i = 0; i < results.Count; i++)
+            {
+                var (load, kill, mag, item) = results[i];
+                var r = new RectangleF(i * (w + gap), 0, w, b.Height - b.S(2));
+                bool isBest = load == bestLoad;
+                Theme.FillRound(g, Theme.Panel, r, b.S(14));
+                Theme.StrokeRound(g, isBest ? Theme.Accent : Theme.Line, r, b.S(14));
+                float x = r.X + b.S(18), y = r.Y + b.S(16), cw = r.Width - b.S(36);
+                Theme.Draw(g, LoadName(load), capF, Theme.Muted, new RectangleF(x, y, cw, b.S(20)));
+                if (isBest)
+                {
+                    var t = L.T("ЛУЧШЕ", "BEST");
+                    float bw = Theme.Measure(g, t, badgeF).Width + b.S(14);
+                    var br = new RectangleF(r.Right - b.S(18) - bw, y, bw, b.S(20));
+                    Theme.FillRound(g, Theme.Accent, br, b.S(6));
+                    Theme.Draw(g, t, badgeF, Theme.AccentInk, br, Theme.Align.Center);
+                }
+                y += b.S(30);
+                if (kill == null)
+                {
+                    Theme.Draw(g, L.T("нет у этой пушки", "not available"), smallF, Theme.Faint, new RectangleF(x, y + b.S(10), cw, b.S(20)));
+                    continue;
+                }
+                var shots = $"{kill.Shots}";
+                Theme.Draw(g, shots, bigF, Theme.Text, new RectangleF(x, y, cw, b.S(40)));
+                float sw = Theme.Measure(g, shots, bigF).Width;
+                Theme.Draw(g, L.T(" выстр.", " shots"), smallF, Theme.Muted, new RectangleF(x + sw, y + b.S(16), cw, b.S(20)));
+                Theme.Draw(g, Combat.Seconds(kill.Seconds), secF, isBest ? Theme.Accent : Theme.Text, new RectangleF(x, y + b.S(8), cw, b.S(30)), Theme.Align.Right);
+                y += b.S(50);
+                string per = kill.PerHit.ToString(kill.PerHit < 10 ? "0.0" : "0", L.Ru ? System.Globalization.CultureInfo.GetCultureInfo("ru-RU") : System.Globalization.CultureInfo.InvariantCulture);
+                Theme.Draw(g, L.T($"{per} урона за попадание", $"{per} damage per hit") + (kill.Armoured ? L.T(" (через броню)", " (through armour)") : ""),
+                           smallF, Theme.Muted, new RectangleF(x, y, cw, b.S(20)));
+                y += b.S(24);
+                Theme.Draw(g, L.T("Магазин: ", "Magazine: ") + (mag is int m ? L.Money(m) : "—"), smallF, Theme.Muted, new RectangleF(x, y, cw, b.S(20)));
+                y += b.S(24);
+                Theme.Draw(g, L.T("Открывается: ", "Unlock: ") + (item != null ? L.UnlockText(item.Unlock) : "—"), smallF, Theme.Faint, new RectangleF(x, y, cw, b.S(20)));
+            }
+        };
+
+        pick.Click += (_, _) =>
+        {
+            var m = DarkMenu.Create();
+            foreach (var w in weapons) m.Items.Add(L.Name(w), null, (_, _) => { weapon = w; Recalc(); });
+            m.Show(pick, new Point(0, pick.Height + Sc(4)));
+        };
+        foreach (var s in new[] { segBody, segHelmet, segDist, segZone }) s.SelectedIndexChanged += (_, _) => Recalc();
+
+        page.Controls.Add(grid);
+        page.Controls.Add(Gap(12));
+        page.Controls.Add(advice);
+        page.Controls.Add(cards);
+        page.Controls.Add(Gap(10));
+        page.Controls.Add(controls);
+        page.Controls.Add(Header(L.T("Бой: урон и время убийства", "Combat: damage & time to kill"),
+            L.T("Выстрелы и время до убийства по зоне, броне, шлему, дистанции и патронам — та же модель, что в калькуляторе MetaForge. Время — с первого выстрела, вместе с полётом пули.",
+                "Shots and time to kill by zone, armour, helmet, distance and ammo — the same model as MetaForge's calculator. Time counts from the first shot and includes bullet travel."),
+            pick));
+        Recalc();
+        return page;
+    }
+
+    /// <summary>Совет по патронам: что быстрее убивает и стоит ли переплачивать.</summary>
+    static string Advice(List<(RoundLoad Load, Kill? Kill, int? Mag, DbItem? Item)> res, int body, string zone, int helmet)
+    {
+        var ok = res.Where(r => r.Kill != null).ToList();
+        if (ok.Count == 0) return "";
+        var best = ok.OrderBy(r => r.Kill!.Seconds).ThenBy(r => r.Mag ?? int.MaxValue).First();
+        var fmj = ok.FirstOrDefault(r => r.Load == RoundLoad.FMJ);
+        bool armoured = best.Kill!.Armoured;
+        string target = armoured ? (zone is "head" or "neck" ? L.T($"шлема {helmet} ур.", $"a level {helmet} helmet") : L.T($"брони {body} ур.", $"level {body} armour"))
+                                 : L.T("незащищённой зоны", "an unprotected zone");
+        if (ok.Count == 1) return L.T($"У этой пушки только обычные патроны: {best.Kill.Shots} выстр. за {Combat.Seconds(best.Kill.Seconds)}.",
+                                      $"This weapon only has standard rounds: {best.Kill.Shots} shots in {Combat.Seconds(best.Kill.Seconds)}.");
+        // Тот же результат дешевле — так и советуем.
+        if (best.Load != RoundLoad.FMJ && fmj.Kill != null && fmj.Kill.Shots == best.Kill.Shots)
+            return L.T($"Против {target} {LoadShort(best.Load)} не быстрее обычных — {fmj.Kill.Shots} выстр. Бери FMJ: магазин {L.Money(fmj.Mag ?? 0)} вместо {L.Money(best.Mag ?? 0)}.",
+                       $"Against {target}, {LoadShort(best.Load)} is no faster than standard — {fmj.Kill.Shots} shots. Take FMJ: {L.Money(fmj.Mag ?? 0)} per magazine instead of {L.Money(best.Mag ?? 0)}.");
+        var worst = ok.OrderByDescending(r => r.Kill!.Seconds).First();
+        var s = L.T($"Против {target} лучше {LoadShort(best.Load)}: {best.Kill.Shots} выстр. за {Combat.Seconds(best.Kill.Seconds)}",
+                    $"Against {target}, {LoadShort(best.Load)} is best: {best.Kill.Shots} shots in {Combat.Seconds(best.Kill.Seconds)}");
+        if (worst.Load != best.Load && worst.Kill!.Shots > best.Kill.Shots)
+            s += L.T($", а {LoadShort(worst.Load)} — {worst.Kill.Shots} выстр.", $", while {LoadShort(worst.Load)} needs {worst.Kill.Shots}.");
+        else s += ".";
+        if (best.Mag is int bm && fmj.Mag is int fm && best.Load != RoundLoad.FMJ) s += L.T($" Магазин {L.Money(bm)} (FMJ — {L.Money(fm)}).", $" Magazine {L.Money(bm)} (FMJ {L.Money(fm)}).");
+        return s;
     }
 
     // ---------- патч ----------
