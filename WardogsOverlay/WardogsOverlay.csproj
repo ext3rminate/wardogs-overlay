@@ -11,7 +11,7 @@
     <AssemblyName>WardogsOverlay</AssemblyName>
     <RootNamespace>WardogsOverlay</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.1.1</Version>
+    <Version>1.2.0</Version>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
 
     <!-- Минимум ресурсов: обычный (не серверный) GC без фонового потока, экономия памяти -->
