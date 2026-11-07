@@ -40,6 +40,9 @@ sealed class Scanner : IDisposable
     public bool GameFound { get; private set; }
     /// <summary>Игра на переднем плане — не время перезапускаться ради обновления.</summary>
     public bool GameForeground => lastForeground;
+    /// <summary>Снимки игры давно чёрные: скорее всего, эксклюзивный полноэкранный режим.</summary>
+    public bool CaptureBlack { get; private set; }
+    int blankFrames;
     public string PlaqueStatus { get; private set; } = "—";
     public event Action? StatusChanged;
 
@@ -172,6 +175,23 @@ sealed class Scanner : IDisposable
         }
 
         var frame = capture.Grab(client);
+        // Чёрный снимок 20 раз подряд (≈20 с) — не загрузка, а полноэкранный режим, который не даёт снимать окно.
+        if (frame.IsBlank())
+        {
+            if (++blankFrames == 20 && !CaptureBlack)
+            {
+                CaptureBlack = true;
+                Log.Info("Снимки игры чёрные — похоже на эксклюзивный полноэкранный режим");
+                Notify();
+            }
+            Hide(L.T("снимок экрана чёрный", "screen capture is black"));
+            return settings.ScanIntervalMs;
+        }
+        if (blankFrames > 0 || CaptureBlack)
+        {
+            blankFrames = 0;
+            if (CaptureBlack) { CaptureBlack = false; Notify(); }
+        }
         var rec = recognizer.Run(frame);
         if (debugRequested) SaveDebug(frame, rec);
         else if (settings.AutoDebugFrames && rec.Menu && now - lastAutoDebug > 60_000
@@ -331,7 +351,7 @@ sealed class Scanner : IDisposable
         if (!auto) debugRequested = false;
         try
         {
-            var dir = Path.Combine(AppContext.BaseDirectory, "debug");
+            var dir = Path.Combine(AppPaths.Root, "debug");
             Directory.CreateDirectory(dir);
             if (auto)
                 foreach (var old in new DirectoryInfo(dir).GetFiles("auto_*").OrderByDescending(f => f.LastWriteTime).Skip(18))

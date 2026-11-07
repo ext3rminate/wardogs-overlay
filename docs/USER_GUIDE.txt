@@ -64,7 +64,15 @@ In-game hotkeys (active only while the game is in the foreground)
 Settings
   Adjust panel size, opacity, compact mode (main stats only), slot options, capture
   visibility, build priority and budget, and start minimized to tray.
-  Settings are stored in settings.json next to the executable.
+  Settings are stored in settings.json next to the executable. If that folder is read-only
+  (for example, Program Files), settings and data live in %LOCALAPPDATA%\WardogsOverlay.
+
+Troubleshooting
+  • Help & game check (bottom of the main window) checks the game window and text recognition.
+  • A black screen capture means the game is in Fullscreen mode — switch to Borderless windowed.
+  • Hotkeys taken by another program are listed under In-game keys.
+  • Report a problem builds a zip (log, settings, system info, recent snapshots) and opens a
+    GitHub issue page; attach the zip if you want. Nothing is sent automatically.
 
 Updates
   The application checks GitHub Releases at startup and every 6 hours. With "Update
@@ -160,7 +168,15 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
 Настройки — в окне программы
   Размер и непрозрачность плашки, компактный режим (только главные статы), варианты для слота,
   скрытие плашки от записи/стрима, приоритет и бюджет подбора, запуск свёрнутым в трей.
-  Всё хранится в settings.json рядом с программой.
+  Всё хранится в settings.json рядом с программой. Если туда писать нельзя (например, Program Files),
+  настройки и база хранятся в %LOCALAPPDATA%\WardogsOverlay.
+
+Если что-то не работает
+  • «Помощь и проверка игры» внизу главного окна проверит окно игры и распознавание текста.
+  • Чёрный снимок экрана — игра в режиме «Полный экран»: включи «Оконный без рамки».
+  • Сочетания клавиш, занятые другой программой, видно в карточке «Клавиши в игре».
+  • «Сообщить о проблеме» соберёт архив (журнал, настройки, сведения, последние снимки) и откроет
+    страницу issue на GitHub — архив можно приложить. Сама программа ничего не отправляет.
 
 Обновления
   Программа проверяет GitHub Releases при запуске и раз в 6 часов. С флагом «Обновлять

@@ -134,7 +134,7 @@ sealed class GameData
     const string NewsUrl = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid=1867240&count=12&maxlength=0&feeds=steam_community_announcements&format=json";
     static string UrlOf(string name) => name == NewsFile ? NewsUrl : Api + name;
 
-    public static string Dir => Path.Combine(AppContext.BaseDirectory, "data");
+    public static string Dir => Path.Combine(AppPaths.Root, "data");
     static string IconDir => Path.Combine(Dir, "icons");
     static string JsonPath(string name) => Path.Combine(Dir, name.Replace('/', '-') + ".json");
     /// <summary>Свежескачанный файл, ещё не проверенный (лежит рядом с рабочим, пока база из него не откроется).</summary>

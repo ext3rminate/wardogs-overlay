@@ -24,7 +24,8 @@ sealed class MainForm : Form
     Toggle tKill = null!, tLife = null!;
     static readonly int[] KillDistances = [10, 50, 100, 200, 300];
     Toggle tSearch = null!, tOptions = null!, tCompact = null!, tMoney = null!, tHide = null!, tTray = null!, tAuto = null!;
-    Label lblUpdVal = null!;
+    Label lblUpdVal = null!, lblKeysWarn = null!;
+    bool blackHintShown;
     Label? lblBannerStatus;
     UiButton btnCheck = null!;
     UiButton? btnInstall;
@@ -41,7 +42,7 @@ sealed class MainForm : Form
     Slider slScale = null!, slOpacity = null!;
     TextField budget = null!;
     LinkLabel lnkUpdate = null!;
-    readonly ToolStripMenuItem miOpen = new(), miToggle = new(), miDb = new(), miExit = new();
+    readonly ToolStripMenuItem miOpen = new(), miToggle = new(), miDb = new(), miReport = new(), miExit = new();
 
     float D => DeviceDpi / 96f;
     int Sc(float px) => (int)Math.Round(px * D);
@@ -74,9 +75,11 @@ sealed class MainForm : Form
         miToggle.Click += (_, _) => scanner?.SetEnabled(!scanner.Enabled);
         miDb.Click += (_, _) => OpenDatabase();
         miExit.Click += (_, _) => ExitApp();
-        menu.Items.AddRange([miOpen, miDb, miToggle, new ToolStripSeparator(), miExit]);
+        miReport.Click += (_, _) => ReportProblem();
+        menu.Items.AddRange([miOpen, miDb, miToggle, miReport, new ToolStripSeparator(), miExit]);
         tray.ContextMenuStrip = menu;
         tray.DoubleClick += (_, _) => ShowFromTray();
+        overlay.BusyKeysChanged += () => { if (IsHandleCreated) BeginInvoke(UpdateKeysWarn); };
         tray.BalloonTipClicked += (_, _) =>
         {
             if (recognizer?.Data is { } d && d.PatchBuild.Length > 0 && settings.SeenPatchBuild != d.PatchBuild)
@@ -367,6 +370,11 @@ sealed class MainForm : Form
                                        "Ctrl+Shift + key. Only while the game is focused."), 12, 400, Theme.Faint);
         keysHint.MaximumSize = new Size(inner - Sc(36), 0);
         keys.Body.Controls.Add(keysHint);
+        lblKeysWarn = Lbl("", 13, 500, Theme.BadText);
+        lblKeysWarn.MaximumSize = new Size(inner - Sc(36), 0);
+        lblKeysWarn.Margin = new Padding(0, Sc(8), 0, 0);
+        keys.Body.Controls.Add(lblKeysWarn);
+        UpdateKeysWarn();
         col.Controls.Add(keys.Card);
 
         // --- подвал
@@ -389,9 +397,15 @@ sealed class MainForm : Form
         }
         lnkUpdate = Link(L.T("Обновить базу", "Update data"), async () => await RefreshData(manual: true));
         links.Controls.AddRange([lnkUpdate, Link(L.T("Журнал", "Log"), ShowLog),
-            Link(L.T("Папка", "Folder"), () => Process.Start("explorer.exe", AppContext.BaseDirectory))]);
+            Link(L.T("Папка", "Folder"), () => Process.Start("explorer.exe", AppPaths.Root))]);
         foot.Controls.Add(links, 1, 0);
         col.Controls.Add(foot);
+        var help = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, Sc(2), 0, 0), Anchor = AnchorStyles.Right };
+        help.Controls.AddRange([Link(L.T("Помощь и проверка игры", "Help & game check"), ShowWelcome),
+                                Link(L.T("Сообщить о проблеме", "Report a problem"), ReportProblem)]);
+        var helpRow = new FlowLayoutPanel { Width = inner, Height = Sc(26), FlowDirection = FlowDirection.RightToLeft, BackColor = Theme.Bg, Margin = Padding.Empty };
+        helpRow.Controls.Add(help);
+        col.Controls.Add(helpRow);
 
         scroll.Controls.Add(col);
         Controls.Add(scroll);
@@ -521,6 +535,7 @@ sealed class MainForm : Form
         miDb.Text = L.T("База и сборки…", "Database & builds…");
         miToggle.Text = L.T("Поиск вкл/выкл", "Search on/off");
         miExit.Text = L.T("Выход", "Exit");
+        miReport.Text = L.T("Сообщить о проблеме…", "Report a problem…");
     }
 
     void LoadSettingsToUi()
@@ -576,6 +591,43 @@ sealed class MainForm : Form
     {
         base.OnShown(e);
         if (!Preview) StartAsync();
+        if (!Preview && settings.IsNew) BeginInvoke(ShowWelcome);
+    }
+
+    /// <summary>Только для проверки внешнего вида: прокрутить окно до низа.</summary>
+    public void PreviewScrollToEnd() => scroll.AutoScrollPosition = new Point(0, scroll.DisplayRectangle.Height);
+
+    void ShowWelcome()
+    {
+        if (!Visible) ShowFromTray();
+        using var w = new WelcomeForm(settings, () => { dbForm?.Close(); BeginInvoke(Rebuild); });
+        w.ShowDialog(this);
+    }
+
+    void UpdateKeysWarn()
+    {
+        if (lblKeysWarn == null || lblKeysWarn.IsDisposed) return;
+        var busy = overlay.BusyKeys;
+        lblKeysWarn.Text = busy.Count == 0 ? "" : L.T(
+            $"Заняты другой программой: {string.Join(", ", busy.Select(k => "Ctrl+Shift+" + k))}. Освободи их в той программе (запись экрана, мессенджер…).",
+            $"Taken by another program: {string.Join(", ", busy.Select(k => "Ctrl+Shift+" + k))}. Free them in that program (recorder, messenger…).");
+        lblKeysWarn.Visible = busy.Count > 0;
+    }
+
+    /// <summary>Собрать архив для отчёта (журнал, настройки, сведения, снимки) и открыть страницу issue.</summary>
+    void ReportProblem()
+    {
+        try
+        {
+            var info = Diagnostics.SystemInfo(settings, scanner, recognizer?.Data, overlay.BusyKeys);
+            var zip = ProblemReport.Create(info);
+            ProblemReport.Open(zip);
+        }
+        catch (Exception ex)
+        {
+            Log.Info("Отчёт не собрался: " + ex.Message);
+            MessageBox.Show(this, L.T("Не получилось собрать отчёт: ", "Could not build the report: ") + ex.Message, "Wardogs overlay", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     async void StartAsync()
@@ -913,6 +965,18 @@ sealed class MainForm : Form
         loading = false;
         lblSearchVal.Text = s == null ? L.T("Запуск…", "Starting…") : s.Enabled ? L.T("Идёт", "Running") : L.T("Выключен", "Off");
         var game = s?.GameStatus ?? "—";
+        if (s?.CaptureBlack == true)
+        {
+            // Эксклюзивный полноэкранный режим: Windows не отдаёт программам картинку игры.
+            game = L.T("снимок чёрный — включи «Оконный без рамки»", "capture is black — use Borderless windowed");
+            if (!blackHintShown)
+            {
+                blackHintShown = true;
+                tray.ShowBalloonTip(8000, L.T("Оверлей не видит игру", "The overlay can't see the game"),
+                    L.T("Снимок экрана чёрный: похоже, игра в режиме «Полный экран». Включи в настройках игры «Оконный без рамки».",
+                        "Screen capture is black: the game seems to be in Fullscreen mode. Switch it to Borderless windowed in the game settings."), ToolTipIcon.Warning);
+            }
+        }
         lblGameVal.Text = game.Length > 0 ? char.ToUpper(game[0]) + game[1..] : game;
         gameDot.Invalidate();
         lblPlaqueVal.Text = s?.PlaqueStatus ?? "—";

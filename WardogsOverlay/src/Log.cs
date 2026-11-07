@@ -4,7 +4,7 @@ static class Log
 {
     static readonly object Gate = new();
     static readonly Queue<string> Recent = new();
-    public static string FilePath => Path.Combine(AppContext.BaseDirectory, "overlay.log");
+    public static string FilePath => Path.Combine(AppPaths.Root, "overlay.log");
     public static bool Echo { get; set; }
 
     public static void Info(string msg)

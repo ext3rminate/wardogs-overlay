@@ -452,6 +452,10 @@ sealed class OverlayForm : Form
 
     readonly Settings settings;
     readonly HashSet<Hotkey> registered = [];
+    readonly HashSet<char> busyKeys = [];
+    /// <summary>Клавиши (буквы для Ctrl+Shift), которые заняла другая программа.</summary>
+    public IReadOnlyCollection<char> BusyKeys => busyKeys;
+    public event Action? BusyKeysChanged;
     OverlayModel? model;
     float scale = 1;
     bool gameForeground, moveMode;
@@ -521,8 +525,21 @@ sealed class OverlayForm : Form
         {
             bool want = gameForeground && (!needsPlaque || Visible);
             if (want == registered.Contains(id)) continue;
-            if (want && RegisterHotKey(Handle, (int)id, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, key)) registered.Add(id);
-            else if (!want) { UnregisterHotKey(Handle, (int)id); registered.Remove(id); }
+            if (want && RegisterHotKey(Handle, (int)id, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, key))
+            {
+                registered.Add(id);
+                if (busyKeys.Remove(key)) BusyKeysChanged?.Invoke();
+            }
+            else if (want)
+            {
+                // Сочетание уже занято другой программой (запись экрана, мессенджер…) — показываем в окне.
+                if (busyKeys.Add(key))
+                {
+                    Log.Info($"Ctrl+Shift+{key} занято другой программой (код {System.Runtime.InteropServices.Marshal.GetLastWin32Error()})");
+                    BusyKeysChanged?.Invoke();
+                }
+            }
+            else { UnregisterHotKey(Handle, (int)id); registered.Remove(id); }
         }
     }
 

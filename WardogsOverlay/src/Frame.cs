@@ -39,6 +39,23 @@ sealed class Frame
     public byte[] Px { get; }
 
     public Frame(int w, int h) : this(w, h, new byte[w * h * 4]) { }
+
+    /// <summary>
+    /// Снимок почти целиком чёрный: так выглядит эксклюзивный полноэкранный режим (Windows отдаёт
+    /// программам пустой кадр) — или экран загрузки.
+    /// </summary>
+    public bool IsBlank()
+    {
+        int step = Math.Max(4, Math.Min(W, H) / 60), bright = 0, total = 0;
+        for (int y = step / 2; y < H; y += step)
+            for (int x = step / 2; x < W; x += step)
+            {
+                var (r, g, b) = Rgb(x, y);
+                total++;
+                if (r + g + b > 45) bright++;
+            }
+        return total > 0 && bright < total / 200 + 1;
+    }
     public Frame(int w, int h, byte[] px) { W = w; H = h; Px = px; }
 
     public RectI Bounds => new(0, 0, W, H);

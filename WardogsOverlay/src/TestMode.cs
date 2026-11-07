@@ -22,6 +22,22 @@ static class TestMode
         }
         if (files.Length >= 1 && files[0] == "--test-window") return TestWindow();
         if (files.Length >= 1 && files[0] == "--self-check") return SelfCheck();
+        if (files.Length >= 1 && files[0] == "--where") { Console.WriteLine($"data: {AppPaths.Root} (portable: {AppPaths.Portable})"); return 0; }
+        if (files.Length >= 2 && files[0] == "--test-welcome")
+        {
+            L.Current = files.Contains("--en") ? Lang.En : Lang.Ru;
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+            Ui.Theme.Load();
+            using var wf = new WelcomeForm(new Settings { Language = L.Current }, () => { }) { StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000) };
+            wf.Show();
+            var until2 = Environment.TickCount64 + 500;
+            while (Environment.TickCount64 < until2) { Application.DoEvents(); Thread.Sleep(10); }
+            using var bmp = new Bitmap(wf.Width, wf.Height);
+            wf.DrawToBitmap(bmp, new Rectangle(0, 0, wf.Width, wf.Height));
+            bmp.Save(files[1]);
+            Console.WriteLine($"→ {files[1]} {wf.Width}x{wf.Height}");
+            return 0;
+        }
         if (files.Length >= 2 && files[0] == "--test-db") return TestDatabase(files[1], files.Contains("--en"));
         if (files.Length >= 2 && files[0] == "--test-main")
         {
@@ -34,6 +50,7 @@ static class TestMode
             using var mf = new MainForm(st, ov) { Preview = true, StartPosition = FormStartPosition.Manual, Location = new Point(-4000, -4000), ShowInTaskbar = false };
             mf.Show();
             if (files.Contains("--tall")) mf.Height = 4200; // всё окно целиком, без прокрутки
+            if (files.Contains("--bottom")) { Application.DoEvents(); mf.PreviewScrollToEnd(); }
             var until = Environment.TickCount64 + 600;
             while (Environment.TickCount64 < until) { Application.DoEvents(); Thread.Sleep(10); }
             using var bmp = new Bitmap(mf.Width, mf.Height);
@@ -224,6 +241,17 @@ static class TestMode
         var clean = TextUtil.CleanSteamText("[h2]Patch[/h2][list][*]One[*]Two[/list][img]{STEAM_CLAN_IMAGE}/a.png[/img]" +
                                             "[dynamiclink href=\"https://x\"][/dynamiclink][url=https://y]link[/url] &amp; done");
         Check("текст анонса Steam очищен от разметки", !clean.Contains('[') && clean.Contains("• One") && clean.Contains("link & done"), clean.Replace("\n", " / "));
+
+        // Надёжность: чёрный кадр, отчёт о проблеме.
+        var black = new Frame(1920, 1080);
+        Check("чёрный кадр распознаётся как чёрный", black.IsBlank());
+        var lit = new Frame(1920, 1080);
+        for (int i = 0; i < lit.Px.Length; i += 4) { lit.Px[i] = 40; lit.Px[i + 1] = 50; lit.Px[i + 2] = 60; lit.Px[i + 3] = 255; }
+        Check("обычный кадр — не чёрный", !lit.IsBlank());
+        var report = ProblemReport.Create("test");
+        using (var z = System.IO.Compression.ZipFile.OpenRead(report))
+            Check("отчёт о проблеме: архив с system.txt", z.Entries.Any(e => e.Name == "system.txt"), string.Join(", ", z.Entries.Select(e => e.FullName)));
+        File.Delete(report);
 
         // Экономика: стрельбище $10 000 → продавец $324 935 → $376 326 (реальная сессия 29.10).
         var s = new EconomySession();

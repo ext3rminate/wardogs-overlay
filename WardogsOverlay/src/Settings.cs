@@ -71,11 +71,14 @@ sealed class Settings
         Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
     };
 
+    /// <summary>Файла настроек не было — первый запуск (покажем окно «Первый запуск»).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool IsNew { get; private set; }
+
     /// <summary>Настройки меняются из окна и горячими клавишами, читаются фоновым потоком.</summary>
     public event Action? Changed;
     public void NotifyChanged() { Save(); Changed?.Invoke(); }
 
-    public static string FilePath => Path.Combine(AppContext.BaseDirectory, "settings.json");
+    public static string FilePath => Path.Combine(AppPaths.Root, "settings.json");
 
     public static Settings Load()
     {
@@ -90,7 +93,7 @@ sealed class Settings
             Log.Info("settings.json не читается, беру значения по умолчанию: " + e.Message);
             SafeFile.Quarantine(FilePath);
         }
-        return new Settings();
+        return new Settings { IsNew = !File.Exists(FilePath) };
     }
 
     /// <summary>Значения из файла могли поправить руками: 0 мс в интервале — это 100% ядра, null — падение.</summary>
