@@ -2,7 +2,7 @@
 
 ## English
 
-### Unreleased
+### 1.1.1 — 2026-11-07
 
 - The game menu is recognized in both the English and the Russian game interface. Windows no longer needs the Russian language installed: without it, Russian labels are matched by letter shapes as read by the English OCR engine.
 - English UI details: "ATTC." and "AMMO" buttons, "ATTACHMENTS" header (or its usual position if unreadable), and balances like "$12,500".
@@ -35,7 +35,7 @@
 
 ## Русский
 
-### Не выпущено
+### 1.1.1 — 2026-11-07
 
 - Меню распознаётся и в английской, и в русской версии игры. Русский язык в Windows больше не нужен: без него русские подписи узнаются по начертанию букв, как их читает английский OCR.
 - Английская игра: кнопки «ATTC.» и «AMMO», заголовок «ATTACHMENTS» (или его обычное место, если не прочитался) и баланс вида «$12,500».
