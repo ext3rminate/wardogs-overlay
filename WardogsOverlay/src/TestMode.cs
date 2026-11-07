@@ -55,6 +55,28 @@ static class TestMode
             Console.WriteLine($"−${spent}: [{kind}] {what}");
             return 0;
         }
+        if (files.Length >= 2 && files[0] == "--corner")
+        {
+            // Баланс в углу экрана — как его раз в 2 с читает оверлей (в бою и у продавца).
+            var rcg = new Recognizer(new OcrService()) { Data = GameData.Load() };
+            foreach (var file in files.Skip(1).Where(x => !x.StartsWith("--")))
+            {
+                using var b = new Bitmap(file);
+                var fr = Frame.FromBitmap(b);
+                var corner = RectI.FromLTRB((int)(fr.W * 0.70), 0, fr.W, Math.Max(24, (int)(fr.H * 0.07)));
+                var sw = Stopwatch.StartNew();
+                var (bal, cart) = rcg.ReadCorner(fr.Crop(corner), fr.W, fr.H);
+                Console.WriteLine($"{Path.GetFileName(file)}: баланс {bal?.ToString() ?? "—"}, закуп {cart?.ToString() ?? "—"} ({sw.ElapsedMilliseconds} мс)");
+                if (files.Contains("--words"))
+                {
+                    var c = fr.Crop(corner); double k = 1080.0 / fr.H * 2.5;
+                    var big = c.Resize((int)(c.W * k), (int)(c.H * k));
+                    foreach (var eng in new[] { "en", "ru" })
+                        Console.WriteLine($"  {eng}: " + string.Join("  ", (eng == "en" ? new OcrService().English(big) : new OcrService().Russian(big)).SelectMany(l => l.Words).Select(w => $"«{w.Text}»{w.Box}")));
+                }
+            }
+            return 0;
+        }
         if (files.Length >= 1 && files[0] == "--where") { Console.WriteLine($"data: {AppPaths.Root} (portable: {AppPaths.Portable})"); return 0; }
         if (files.Length >= 2 && files[0] == "--test-welcome")
         {
@@ -293,6 +315,10 @@ static class TestMode
         var tj = DateTime.Now;
         Check("одиночная сумма не принимается на экране без меню", Recognizer.ReadBalance([new OcrLineText("$280 787", [new OcrWord("$280", new RectI(1700, 30, 48, 20)), new OcrWord("787", new RectI(1756, 30, 36, 20))])],
               new Frame(1920, 1080), new Recognition(), requirePair: true) == null);
+        var am = Recognizer.AmountsIn("-$23 810  $280 787");
+        Check("угол экрана: «−$23 810  $280 787» — баланс справа, минус слева не закуп",
+              am.Count == 2 && am[0] == (23810, true) && am[1] == (280787, false), string.Join(" | ", am));
+        Check("плашка денег в бою «$12,500»", Recognizer.AmountsIn("$12,500") is [(12500, false)]);
         Check("баланс английской игры $0 | $12,500", Balance("$0", "|", "$12,500") == 12500, Balance("$0", "|", "$12,500")?.ToString() ?? "null");
 
         // Слова интерфейса: русская игра (русским и английским OCR) и английская игра.

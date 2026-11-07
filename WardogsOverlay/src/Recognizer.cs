@@ -22,6 +22,8 @@ sealed class Recognition
     public List<(int Value, RectI Box)> PriceTags = [];
     /// <summary>Строки текста с экрана — по ним узнаём, что именно куплено (название выбранного предмета).</summary>
     public List<string> ScreenLines = [];
+    /// <summary>Левая сумма у продавца («$80» рядом с балансом) — стоимость текущего закупа.</summary>
+    public int? CartValue;
     /// <summary>Экран продавца без меню модулей (виден только баланс).</summary>
     public bool VendorScreen;
     /// <summary>Общий OCR увидел начало баланса («$304»), но дальше кусок числа не разобрался.</summary>
@@ -263,16 +265,18 @@ sealed class Recognizer(OcrService ocr)
     /// Деньги игрока — справа сверху на экране продавца: «$0 | $10 000». Берём самую правую сумму.
     /// OCR разбивает «$10 000» на слова «$10» и «000», поэтому склеиваем соседние группы из трёх цифр.
     /// </summary>
-    internal static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec, bool requirePair = false)
+    internal static int? ReadBalance(List<OcrLineText> lines, Frame f, Recognition rec, bool requirePair = false, RectI? zoneOverride = null)
     {
-        var zone = RectI.FromLTRB((int)(f.W * 0.68), 0, f.W, (int)(f.H * 0.09));
+        var zone = zoneOverride ?? RectI.FromLTRB((int)(f.W * 0.68), 0, f.W, (int)(f.H * 0.09));
         var amounts = new List<(int X, int? Value, string Text, int? Head)>();
+        var negative = new HashSet<int>();
         foreach (var line in lines)
         {
             var ws = line.Words.Where(w => zone.Contains(w.Box.CenterX, w.Box.CenterY)).OrderBy(w => w.Box.X).ToList();
             for (int i = 0; i < ws.Count; i++)
             {
                 // «−$23 810» слева (в гараже) — тоже сумма: знак не мешает узнать пару «корзина | баланс».
+                bool neg = ws[i].Text.Length > 0 && ws[i].Text[0] is '-' or '−' or '–';
                 var t = TextUtil.DigitLike(ws[i].Text.TrimStart('-', '−', '–', '+').Replace('S', '$').Replace('§', '$'));
                 if (!t.StartsWith('$')) continue;
                 int x = ws[i].Box.X, right = ws[i].Box.Right, gap = (int)(ws[i].Box.H * 1.2);
@@ -299,6 +303,7 @@ sealed class Recognizer(OcrService ocr)
                     digits += next; text += " " + next; right = ws[j].Box.Right; i = j;
                 }
                 int? headValue = head.Length is > 0 and <= 3 && head.All(char.IsAsciiDigit) ? int.Parse(head) : null;
+                if (neg) negative.Add(x);
                 amounts.Add((x, ok && digits.Length <= 9 && int.TryParse(digits, out var v) ? v : null, text, headValue));
             }
         }
@@ -315,7 +320,53 @@ sealed class Recognizer(OcrService ocr)
             return null;
         }
         rec.Trace.Add($"деньги: {string.Join(" | ", amounts.Select(a => a.Text))} → {best.Value}");
+        // Сумма слева от баланса — стоимость закупа (без минуса: «−$23 810» в гараже — не она).
+        var cart = amounts.Where(a => a.X < best.X && a.Value != null).OrderByDescending(a => a.X).FirstOrDefault();
+        if (cart.Value is int cv && !negative.Contains(cart.X)) rec.CartValue = cv;
         return best.Value;
+    }
+
+    /// <summary>
+    /// Баланс в углу экрана — в бою (плашка «$12,500» справа сверху) и у продавца («$80 | $334 303»).
+    /// corner — правые 30% окна сверху. Windows OCR не видит мелкий белый текст на тёмных плашках, если
+    /// вокруг много пустого места, поэтому читаем два тесных окна крупно: плашки продавца и плашку боя.
+    /// </summary>
+    public (int? Balance, int? Cart) ReadCorner(Frame corner, int clientW, int clientH)
+    {
+        double s = 1080.0 / Math.Max(1, clientH);
+        var n = corner.Resize(Math.Max(8, (int)Math.Round(corner.W * s)), Math.Max(8, (int)Math.Round(corner.H * s)));
+        double wn = clientW * s, left = wn * 0.70;
+        RectI Win(double l, double t, double r, double b) => RectI.FromLTRB((int)(l - left), (int)t, (int)(r - left), (int)b).Intersect(n.Bounds);
+        // Плашки продавца у правого края (как в ReadBalanceCrop) и плашка денег в бою в самом углу.
+        foreach (var win in new[] { Win(wn - 360, 6, wn - 112, 60), Win(wn - 160, 4, wn - 2, 62) })
+        {
+            if (win.W < 20 || win.H < 10) continue;
+            var crop = n.Crop(win);
+            foreach (var scale in new[] { 3, 4 })
+                foreach (var russian in ocr.HasRussian ? new[] { false, true } : [false])
+                {
+                    var big = crop.Resize(crop.W * scale, crop.H * scale);
+                    var lines = (russian ? ocr.Russian(big) : ocr.English(big))
+                        .Where(l => l.Words.Count > 0).OrderBy(l => l.Words.Min(w => w.Box.X)).ToList();
+                    var amounts = AmountsIn(string.Join("  ", lines.Select(l => l.Text)));
+                    if (amounts.Count == 0) continue;
+                    var bal = amounts[^1];
+                    if (bal.Negative) continue;
+                    int? cart = amounts.Count >= 2 && !amounts[^2].Negative ? amounts[^2].Value : null;
+                    return (bal.Value, cart);
+                }
+        }
+        return (null, null);
+    }
+
+    /// <summary>Суммы «$12,500», «$334 303», «−$23 810» в тексте по порядку.</summary>
+    internal static List<(int Value, bool Negative)> AmountsIn(string text)
+    {
+        var t = TextUtil.DigitLike(text.Replace('S', '$').Replace('§', '$'));
+        return System.Text.RegularExpressions.Regex.Matches(t, @"([-−–]?)\s*\$\s*(\d{1,3}(?:[\s  ,]\d{3})+|\d{1,9})(?!\w)")
+            .Select(m => (Digits: new string(m.Groups[2].Value.Where(char.IsAsciiDigit).ToArray()), Neg: m.Groups[1].Value.Length > 0))
+            .Where(x => x.Digits.Length is > 0 and <= 9)
+            .Select(x => (int.Parse(x.Digits), x.Neg)).ToList();
     }
 
     /// <summary>

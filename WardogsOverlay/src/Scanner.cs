@@ -17,6 +17,7 @@ sealed class Scanner : IDisposable
     readonly Recognizer recognizer;
     readonly OverlayForm overlay;
     readonly ScreenCapture capture = new();
+    readonly ScreenCapture moneyCapture = new();
     readonly AutoResetEvent wake = new(false);
     readonly Dictionary<string, List<string>> snapshots;
     readonly object snapLock = new();
@@ -167,6 +168,12 @@ sealed class Scanner : IDisposable
         var client = game.ClientRect();
         if (client.W < 320 || client.H < 240) return 1000;
         long now = Environment.TickCount64;
+        // Деньги — в реальном времени: раз в 2 с маленький кусок правого верхнего угла (в бою и у продавца).
+        if (now >= nextMoney)
+        {
+            nextMoney = now + 2000;
+            try { WatchMoney(client); } catch (Exception e) { Log.Info("Чтение денег: " + e.Message); }
+        }
 
         if (track != null && !debugRequested && client == track.Client && now < track.NextFull)
         {
@@ -237,13 +244,18 @@ sealed class Scanner : IDisposable
         // в экономику не пишем: ячейки есть, но ни одной цены, или ровно $10 000 без цен на экране.
         bool priced = rec.Cells.Any(c => c.Price > 0);
         bool range = rec.Cells.Count > 0 && !priced || rec.Balance == 10000 && !priced;
-        if ((rec.Menu || rec.VendorScreen) && rec.Balance is int balance && !range)
+        if ((rec.Menu || rec.VendorScreen) && !range)
         {
-            Economy.Add(balance, visit);
-            var pts = Economy.Current.Points;
-            frameForPurchase = frame;
-            if (pts.Count > 0 && pts[^1].Balance == balance) TrackPurchase(rec, balance);
-            frameForPurchase = null;
+            // Стоимость закупа и состав сборки — чтобы узнать списание, когда игрок выйдет в бой.
+            if (rec.CartValue is int cart and > 0) lastCart = cart;
+            if (rec.Weapon != null)
+                lastKit = string.Join(", ", new[] { L.Name(rec.Weapon) }.Concat(rec.Cells.Where(c => c.Att != null).Select(c => L.Name(c.Att!))));
+            if (rec.Balance is int balance)
+            {
+                frameForPurchase = frame;
+                OnBalance(balance, rec);
+                frameForPurchase = null;
+            }
         }
 
         if (rec.Menu && rec.Weapon != null)
@@ -379,9 +391,54 @@ sealed class Scanner : IDisposable
         SetPlaque(plaque);
     }
 
-    // Что было у продавца при прошлом показании баланса — чтобы понять, на что ушли деньги.
+    // Последний принятый баланс (из боя или у продавца) и что было у продавца — чтобы понять, на что ушли деньги.
     int? vendorBalance;
     string? vendorWeapon;
+    long nextMoney;
+    int? moneyCandidate;
+    int? lastCart;
+    string? lastKit;
+
+    /// <summary>
+    /// Баланс в углу экрана в реальном времени. Счётчик в бою «докручивается» анимацией, поэтому сумму
+    /// принимаем, когда она дважды подряд (через 2 с) одна и та же.
+    /// </summary>
+    void WatchMoney(RectI client)
+    {
+        var corner = RectI.FromLTRB(client.X + (int)(client.W * 0.70), client.Y, client.Right, client.Y + Math.Max(24, (int)(client.H * 0.07)));
+        var (balance, cart) = recognizer.ReadCorner(moneyCapture.Grab(corner), client.W, client.H);
+        if (balance is not int b) { moneyCandidate = null; return; }
+        if (b != moneyCandidate) { moneyCandidate = b; return; }
+        // Стрельбище: там всегда $10 000 — не настоящие деньги.
+        if (b == 10000 && Economy.LastBalance is int lb && lb != 10000) return;
+        if (cart is int c and > 0) lastCart = c;
+        OnBalance(b, null);
+    }
+
+    /// <summary>Новое показание баланса: в экономику и, если деньги убыли, — в «Куда ушли деньги».</summary>
+    void OnBalance(int balance, Recognition? rec)
+    {
+        Economy.Add(balance, visit);
+        var pts = Economy.Current.Points;
+        if (pts.Count == 0 || pts[^1].Balance != balance) return; // показание не принято (скачок, ошибка OCR)
+        if (vendorBalance is int prev && balance < prev && !Economy.IsJump(prev, balance))
+        {
+            int spent = prev - balance;
+            string what, kind;
+            if (lastCart is int c && c == spent)
+            {
+                // Ровно стоимость закупа у продавца — это он: выход в бой с этой сборкой.
+                what = L.T("закуп комплекта", "loadout purchase") + (lastKit != null ? $": {lastKit}" : "");
+                kind = "kit";
+            }
+            else if (rec != null) (what, kind) = VendorPurchase(rec, spent);
+            else (what, kind) = (L.T("трата в бою (закуп, возрождение, техника)", "spent in match (loadout, respawn, vehicle)"), "other");
+            Economy.AddPurchase(spent, what, kind);
+            Log.Info($"Покупка: −{spent} — {what}");
+        }
+        vendorBalance = balance;
+        if (rec?.Weapon != null) { vendorWeapon = rec.Weapon.Slug; vendorAtts = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList(); }
+    }
     Frame? frameForPurchase;
     List<Attachment> vendorAtts = [];
 
@@ -390,30 +447,21 @@ sealed class Scanner : IDisposable
     /// открытия ровно равна потраченному — среди пушки и обвесов на экране; иначе — обвесы, которых не было
     /// в прошлый раз; иначе — патроны, броня или снаряжение.
     /// </summary>
-    void TrackPurchase(Recognition rec, int balance)
+    (string What, string Kind) VendorPurchase(Recognition rec, int spent)
     {
         var now = rec.Cells.Where(c => c.Att != null).Select(c => c.Att!).ToList();
-        if (vendorBalance is int prev && balance < prev && !Economy.IsJump(prev, balance))
+        // Картинка над ценником на ровно потраченную сумму — по ней узнаём предмет, если названия на экране нет.
+        DbItem? ByIcon(List<DbItem> cands)
         {
-            int spent = prev - balance;
-            // Картинка над ценником на ровно потраченную сумму — по ней узнаём предмет, если названия на экране нет.
-            DbItem? ByIcon(List<DbItem> cands)
+            if (frameForPurchase == null) return null;
+            foreach (var tag in rec.PriceTags.Where(t => t.Value == spent))
             {
-                if (frameForPurchase == null) return null;
-                foreach (var tag in rec.PriceTags.Where(t => t.Value == spent))
-                {
-                    var (item, score, second) = recognizer.ItemAt(frameForPurchase, tag.Box, cands);
-                    if (item != null && score >= 0.45 && (cands.Count == 1 || score - second >= 0.04)) return item;
-                }
-                return null;
+                var (item, score, second) = recognizer.ItemAt(frameForPurchase, tag.Box, cands);
+                if (item != null && score >= 0.45 && (cands.Count == 1 || score - second >= 0.04)) return item;
             }
-            var (what, kind) = PurchaseMatcher.Attribute(recognizer.Data, spent, rec.Weapon, now, vendorWeapon, vendorAtts, rec.ScreenLines, ByIcon);
-            Economy.AddPurchase(prev - balance, what, kind);
-            Log.Info($"Покупка: −{prev - balance} — {what}");
+            return null;
         }
-        vendorBalance = balance;
-        // Состав сборки запоминаем только из меню модулей: на других экранах продавца ячеек нет.
-        if (rec.Weapon != null) { vendorWeapon = rec.Weapon.Slug; vendorAtts = now; }
+        return PurchaseMatcher.Attribute(recognizer.Data, spent, rec.Weapon, now, vendorWeapon, vendorAtts, rec.ScreenLines, ByIcon);
     }
 
     void SetForeground(bool fg)
@@ -453,5 +501,6 @@ sealed class Scanner : IDisposable
         wake.Set();
         thread?.Join(2000);
         capture.Dispose();
+        moneyCapture.Dispose();
     }
 }

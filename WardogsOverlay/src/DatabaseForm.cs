@@ -978,8 +978,8 @@ sealed class DatabaseForm : Form
         {
             (L.T("Сейчас", "Now"), () => economy.Current.Points.Count == 0 ? ("—", L.T("нет показаний", "no readings"), Theme.Text)
                 : (L.Money(economy.Current.Points[^1].Balance), L.T("старт ", "start ") + L.Money(economy.Current.Points[0].Balance), Theme.Text)),
-            (L.T("Заработано", "Earned"), () => ("+" + L.Money(economy.Current.Earned), L.T("рост между заходами", "growth between visits"), Theme.Good)),
-            (L.T("Потрачено", "Spent"), () => ("−" + L.Money(economy.Current.Spent), L.T("покупки у продавца", "vendor purchases"), Theme.BadText)),
+            (L.T("Заработано", "Earned"), () => ("+" + L.Money(economy.Current.Earned), L.T("весь рост баланса", "all balance growth"), Theme.Good)),
+            (L.T("Потрачено", "Spent"), () => ("−" + L.Money(economy.Current.Spent), L.T("закупы и покупки", "loadouts and purchases"), Theme.BadText)),
             (L.T("В минуту", "Per minute"), () => (L.Money((int)economy.Current.EarnedPerMinute), L.T($"за {(int)economy.Current.Duration.TotalMinutes} мин", $"over {(int)economy.Current.Duration.TotalMinutes} min"), Theme.Accent)),
         };
         var kl = Theme.UiFont(12); var kv = Theme.MonoFont(26, 600); var ks = Theme.UiFont(12);
@@ -1075,17 +1075,17 @@ sealed class DatabaseForm : Form
             var list = economy.Current.Purchases.ToList();
             if (list.Count == 0)
             {
-                Theme.Draw(g, L.T("Покупки появятся здесь: оверлей видит, как падает баланс у продавца, и что в этот момент появилось в сборке.",
-                                  "Purchases show up here: the overlay sees the vendor balance drop and what appeared in the build at that moment."),
+                Theme.Draw(g, L.T("Траты появятся здесь: оверлей следит за балансом в бою и у продавца.",
+                                  "Spending shows up here: the overlay watches the balance in matches and at the vendor."),
                            hintF, Theme.Faint, new RectangleF(x, y, w, b.Height - y - b.S(12)));
                 return;
             }
-            var kinds = new[] { ("attachments", L.T("обвесы", "attachments")), ("weapon", L.T("пушки", "weapons")),
-                                ("unlock", L.T("открытия", "unlocks")), ("other", L.T("прочее", "other")) };
+            var kinds = new[] { (new[] { "kit" }, L.T("закупы", "loadouts")), (new[] { "attachments", "weapon" }, L.T("пушки и обвесы", "weapons & parts")),
+                                (new[] { "unlock" }, L.T("открытия", "unlocks")), (new[] { "other" }, L.T("прочее", "other")) };
             float cx = x;
             foreach (var (k, label) in kinds)
             {
-                int sum = list.Where(p => p.Kind == k).Sum(p => p.Amount);
+                int sum = list.Where(p => k.Contains(p.Kind)).Sum(p => p.Amount);
                 Theme.Draw(g, L.Money(sum), monoF, sum > 0 ? Theme.Text : Theme.Faint, new RectangleF(cx, y + b.S(4), w / 4, b.S(24)));
                 Theme.Draw(g, label, hintF, Theme.Faint, new RectangleF(cx, y + b.S(28), w / 4, b.S(18)));
                 cx += w / 4;
@@ -1222,8 +1222,8 @@ sealed class DatabaseForm : Form
         page.Controls.Add(tiles);
         page.Controls.Add(Gap(16));
         page.Controls.Add(Header(L.T("Экономика", "Economy"),
-            L.T("Баланс читается с экрана продавца. Рост между заходами — заработок, падение — покупки",
-                "Balance is read from the vendor screen. Growth between visits is income, drops are purchases"), newSession));
+            L.T("Баланс читается в реальном времени — в бою и у продавца. Рост — заработок, падение — траты",
+                "Balance is read in real time — in matches and at the vendor. Growth is income, drops are spending"), newSession));
         Refresh();
         return page;
     }

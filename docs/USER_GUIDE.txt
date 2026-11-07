@@ -17,7 +17,8 @@ What it does
     (▲ better, ▼ worse).
   • Shooting range: weapons and attachments are recognized from their icons even when
     all prices are $0.
-  • Economy: the balance is read from the top-right corner of the vendor screen.
+  • Economy: the balance is read in real time from the top-right corner — the money plaque
+    during a match and the vendor's balance.
     Track session earnings, earnings per minute, spending, a balance chart, and history.
     Session earnings and earnings per minute can also appear at the bottom of the panel.
 
@@ -127,7 +128,7 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
     программа предложит обвесы. Прицел и магазин не трогает — это дело вкуса.
   • Сравнение: запомни сборку и меняй обвесы — плашка покажет «было → сейчас» (▲ лучше, ▼ хуже).
   • Работает и на стрельбище: там всё по $0, поэтому обвесы и пушка узнаются по картинке.
-  • Экономика: деньги читаются с экрана продавца (справа сверху) — заработок за сессию,
+  • Экономика: деньги читаются в реальном времени (справа сверху) — в бою и у продавца; заработок за сессию,
     в минуту, потрачено, график и история сессий. Строка «сессия +$… · $…/мин» внизу плашки.
 
 Окно «База, сборки, экономика…» (кнопка в главном окне или в меню трея)
