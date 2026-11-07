@@ -19,19 +19,21 @@ sealed class OcrService
 
     public OcrService()
     {
-        // Русский движок читает и кириллицу, и латиницу. Если его нет (английская Windows) —
-        // работаем на английском: так распознаётся английская версия игры.
-        var ruEngine = OcrEngine.TryCreateFromLanguage(new Language("ru"));
+        // Есть русский движок — читаем им русскую игру, английским — английскую. Нет русского
+        // (английская Windows) — всё читает английский: русские слова узнаются по начертанию.
+        var ruEngine = ForceEnglish ? null : OcrEngine.TryCreateFromLanguage(new Language("ru"));
         var enEngine = OcrEngine.TryCreateFromLanguage(new Language("en-US"))
                        ?? OcrEngine.TryCreateFromUserProfileLanguages();
         ru = ruEngine ?? enEngine ?? throw new InvalidOperationException(L.T(
-            "В Windows нет ни одного языка распознавания текста. Параметры → Время и язык → Язык → добавить «Русский».",
+            "В Windows нет ни одного языка распознавания текста. Параметры → Время и язык → Язык → добавить «Русский» или «English».",
             "Windows has no text recognition language installed. Settings → Time & language → Language → add English or Russian."));
         en = enEngine ?? ru;
         HasRussian = ruEngine != null;
     }
 
     public bool HasRussian { get; }
+    /// <summary>Только для проверки: вести себя так, будто русского языка распознавания в Windows нет.</summary>
+    public static bool ForceEnglish { get; set; }
 
     /// <summary>Основной движок: русский, если есть (читает и латиницу), иначе английский.</summary>
     public List<OcrLineText> Russian(Frame f) => Recognize(ru, f);

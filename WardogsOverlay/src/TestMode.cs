@@ -56,6 +56,18 @@ static class TestMode
             Console.WriteLine($"без перевода: {same}");
             return 0;
         }
+        if (files.Length >= 2 && files[0] == "--ocr-all")
+        {
+            // Все слова кадра (приведённого к 1080) — посмотреть, как OCR читает интерфейс.
+            OcrService.ForceEnglish = files.Contains("--no-ru-ocr");
+            using var b = new Bitmap(files[1]);
+            var fr = Frame.FromBitmap(b);
+            double k = fr.H >= 700 ? 1080.0 / fr.H : 1;
+            var nf = k == 1 ? fr : fr.Resize((int)(fr.W * k), (int)(fr.H * k));
+            foreach (var line in new OcrService().Russian(nf))
+                Console.WriteLine(string.Join("  ", line.Words.Select(w => $"«{w.Text}»{w.Box}")));
+            return 0;
+        }
         if (files.Length == 2 && files[0] == "--ocr-top")
         {
             using var b = new Bitmap(files[1]);
@@ -89,6 +101,9 @@ static class TestMode
         }
         L.Current = files.Contains("--en") ? Lang.En : Lang.Ru;
         Recognizer.DisableNameOcr = files.Contains("--icon-weapon");
+        OcrService.ForceEnglish = files.Contains("--no-ru-ocr");
+        // --hide=СЛОВО: считать слово непрочитанным (проверка запасных путей распознавания).
+        foreach (var hw in files.Where(f => f.StartsWith("--hide="))) Recognizer.HiddenWords.Add(hw[7..]);
         files = files.Where(f => !f.StartsWith("--")).ToArray();
         if (!GameData.IsDownloaded || GameData.Load().NeedsUpdate) GameData.DownloadAsync(Console.WriteLine).GetAwaiter().GetResult();
         var recognizer = new Recognizer(new OcrService()) { Data = GameData.Load() };
@@ -194,6 +209,17 @@ static class TestMode
         Check("З вместо 3 в группе", Balance("$0", "|", "$324", "9З5") == 324935, Balance("$0", "|", "$324", "9З5")?.ToString() ?? "null");
         Check("испорченная группа → не знаю, а не $324", Balance("$0", "|", "$324", "9?5") == null, Balance("$0", "|", "$324", "9?5")?.ToString() ?? "null");
         Check("правая сумма не читается → не $0 корзины", Balance("$0", "|", "$abc") == null, Balance("$0", "|", "$abc")?.ToString() ?? "null");
+
+        Check("баланс английской игры $0 | $12,500", Balance("$0", "|", "$12,500") == 12500, Balance("$0", "|", "$12,500")?.ToString() ?? "null");
+
+        // Слова интерфейса: русская игра (русским и английским OCR) и английская игра.
+        foreach (var (word, modules) in new[] { ("МОДУЛИ", true), ("модули", true), ("MOAYJIVI", true), ("M0AYJIV1", true), ("ATTC.", true),
+                                                ("ATTACHMENTS", true), ("MODE", false), ("ATTACK", false), ("AMMO", false), ("GALIL", false) })
+            Check($"«{word}» — {(modules ? "" : "не ")}кнопка модулей", TextUtil.IsModulesWord(word) == modules);
+        foreach (var (word, isAmmo) in new[] { ("БОЕПРИПАСЫ", true), ("EOEnPff1ACbl", true), ("EOEnPVff1ACbl", true), ("AMMO", true), ("ATTC.", false), ("MOAYJIVI", false) })
+            Check($"«{word}» — {(isAmmo ? "" : "не ")}кнопка патронов", TextUtil.IsAmmoWord(word) == isAmmo);
+        Check("«ПП-19 «БИЗОН»» по начертанию = «nn-19 «6VI3OH»»", TextUtil.Shape("ПП-19 «БИЗОН»") == TextUtil.Shape("nn-19 «6VI3OH»"),
+              $"{TextUtil.Shape("ПП-19 «БИЗОН»")} / {TextUtil.Shape("nn-19 «6VI3OH»")}");
 
         // Экономика: стрельбище $10 000 → продавец $324 935 → $376 326 (реальная сессия 29.10).
         var s = new EconomySession();

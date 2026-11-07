@@ -38,6 +38,8 @@ sealed class Weapon
     public string Key { get; init; } = "";
     /// <summary>Как название выглядит в русской версии игры, для сравнения с OCR («СВД», «АК74»).</summary>
     public string KeyRu { get; init; } = "";
+    /// <summary>Русское название «по начертанию» — как его прочитает английский OCR.</summary>
+    public string KeyShape { get; init; } = "";
     public string Icon { get; init; } = "";
 }
 
@@ -281,6 +283,7 @@ sealed class GameData
                     Slots = Arr(it, "slots"),
                     Key = TextUtil.Latinize(name),
                     KeyRu = TextUtil.NormRu(L.WeaponRu(name)),
+                    KeyShape = TextUtil.Shape(L.WeaponRu(name)),
                     Icon = Str(it, "icon") ?? "",
                     Price = (int)(Num(it, "price") ?? 0),
                     Unlock = unlock,

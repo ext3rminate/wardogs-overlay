@@ -74,30 +74,36 @@ sealed class Recognizer(OcrService ocr)
         var f = k == 1 ? raw : raw.Resize((int)Math.Round(raw.W * k), (int)Math.Round(raw.H * k));
         RectI ToRaw(RectI r) => k == 1 ? r : r.Scale(1 / k).Intersect(raw.Bounds);
 
-        var lines = ocr.Russian(f);
-        var words = lines.SelectMany(l => l.Words).ToList();
-        var mods = words.Where(w => TextUtil.IsModulesWord(w.Text)).ToList();
-        rec.Trace.Add($"кадр {raw.W}x{raw.H}, k={k:0.###}, слов {words.Count}, «МОДУЛИ»: {string.Join(" ", mods.Select(m => m.Box))}");
-        if (mods.Count < 2) { rec.Reason = "нет меню «Модули»"; return rec; }
-
-        // Заголовок раздела — самое нижнее «МОДУЛИ»; кнопки ячеек — выше него.
-        var header = mods.MaxBy(w => w.Box.Y)!;
-        int h = Math.Max(8, header.Box.H);
-        var buttons = mods.Where(w => w != header && w.Box.Bottom <= header.Box.Y + 2).ToList();
-        var active = buttons.Select(b => (b, frac: OrangeFraction(f, b.Box.Inflate(b.Box.H / 2, b.Box.H / 3))))
-                            .Where(t => t.frac > 0.2).OrderByDescending(t => t.frac).Select(t => t.b).FirstOrDefault();
-        // Пока выбран обвес, кнопка пушки бывает серой — тогда активная та, у которой текст яркий
-        // (у пустых ячеек экипировки он тусклый).
-        active ??= buttons.Select(b => (b, light: TextBrightness(f, b.Box))).Where(t => t.light >= 110)
-                          .OrderByDescending(t => t.light).Select(t => t.b).FirstOrDefault();
-        if (active == null) { rec.Reason = "не вижу выбранную ячейку экипировки (кнопку «МОДУЛИ» пушки)"; return rec; }
+        // Язык игры заранее не известен: русскую игру лучше читает русский движок OCR, английскую
+        // (короткие «AMMO», «ATTC.») — английский. Начинаем с того, что сработал в прошлый раз,
+        // и пробуем второй, если меню не нашлось. Нет русского движка — оба вызова идут в английский.
+        rec.Trace.Add($"кадр {raw.W}x{raw.H}, k={k:0.###}");
+        bool english = englishFirst || !ocr.HasRussian;
+        var lines = english ? ocr.English(f) : ocr.Russian(f);
+        var menu = FindMenu(f, lines, rec, english ? "en" : "ru");
+        if (menu == null && ocr.HasRussian)
+        {
+            var other = english ? ocr.Russian(f) : ocr.English(f);
+            var second = FindMenu(f, other, rec, english ? "ru" : "en");
+            if (second != null)
+            {
+                menu = second;
+                lines = other;
+                englishFirst = !english;
+            }
+        }
+        if (menu == null) return rec;
+        var (words, buttons, header, active, h) = menu.Value;
+        rec.Reason = "";
         rec.Menu = true;
         rec.Trace.Add($"заголовок {header.Box}, активная кнопка {active.Box}");
 
         // --- Пушка: подпись в выбранной ячейке, над кнопками.
         int bh = active.Box.H;
-        var nameZone = RectI.FromLTRB(active.Box.X - (int)(3.2 * active.Box.W), active.Box.Y - (int)(3.8 * bh),
-                                      active.Box.Right + bh / 2, active.Box.Y - bh / 5).Intersect(f.Bounds);
+        // Ширину кнопки берём по высоте: английская подпись «ATTC.» вдвое короче «МОДУЛИ».
+        int bw = Math.Max(active.Box.W, (int)(4.9 * bh));
+        var nameZone = RectI.FromLTRB(active.Box.X - (int)(3.2 * bw), active.Box.Y - (int)(3.8 * bh),
+                                      active.Box.X + bw + bh / 2, active.Box.Y - bh / 5).Intersect(f.Bounds);
         rec.Weapon = DisableNameOcr ? null : FindWeapon(f, lines, nameZone, rec);
         rec.Weapon ??= WeaponByIcon(f, active.Box, rec);
 
@@ -160,7 +166,7 @@ sealed class Recognizer(OcrService ocr)
                     text = string.Join(" ", ocrLines.Select(l => l.Text));
                     var amounts = ocrLines.SelectMany(l => System.Text.RegularExpressions.Regex.Matches(
                             TextUtil.DigitLike(l.Text.Replace('S', '$').Replace('§', '$')),
-                            @"\$\s*(\d{1,3}(?:[\s\u00A0\u202F]\d{3})+|\d{1,9})(?!\w)"))
+                            @"\$\s*(\d{1,3}(?:[\s\u00A0\u202F,]\d{3})+|\d{1,9})(?!\w)"))
                         .Select(m => new string(m.Groups[1].Value.Where(char.IsAsciiDigit).ToArray()))
                         .Where(d => d.Length is > 0 and <= 9).Select(int.Parse).ToList();
                     if (amounts.Count == 0) continue;
@@ -262,13 +268,15 @@ sealed class Recognizer(OcrService ocr)
                     right = ws[i].Box.Right;
                 }
                 var head = t[1..];
+                // Английская игра пишет «$12,500», русская — «$12 500».
+                if (head.Contains(',') && System.Text.RegularExpressions.Regex.IsMatch(head, @"^\d{1,3}(,\d{3})+$")) head = head.Replace(",", "");
                 bool ok = head.Length > 0 && head.All(char.IsAsciiDigit);
                 var digits = ok ? head : "";
                 var text = t;
                 for (int j = i + 1; ok && j < ws.Count; j++)
                 {
                     if (ws[j].Box.X - right > gap) break;
-                    var next = TextUtil.DigitLike(ws[j].Text);
+                    var next = TextUtil.DigitLike(ws[j].Text).TrimStart(',');
                     if (next.StartsWith('$') || !next.Any(char.IsAsciiDigit)) break;
                     // Рядом кусок числа, но не «три цифры» — OCR ошибся: лучше не знать баланс, чем записать в 1000 раз меньше.
                     if (next.Length != 3 || !next.All(char.IsAsciiDigit) || head.Length > 3) { ok = false; text += " " + next; break; }
@@ -291,6 +299,8 @@ sealed class Recognizer(OcrService ocr)
 
     /// <summary>Только для проверки: не читать название, узнавать пушку лишь по картинке.</summary>
     public static bool DisableNameOcr { get; set; }
+    /// <summary>Только для проверки: слова, которые считаем непрочитанными (например, заголовок раздела).</summary>
+    public static HashSet<string> HiddenWords { get; } = [];
 
     Weapon? FindWeapon(Frame f, List<OcrLineText> lines, RectI zone, Recognition rec)
     {
@@ -320,9 +330,10 @@ sealed class Recognizer(OcrService ocr)
             // Сравниваем и с латинским названием (GALIL, TCX-SPR), и с русским (АК-74, СВД, ПКМ).
             var lat = TextUtil.Latinize(t);
             var cyr = TextUtil.NormRu(t);
+            var shape = TextUtil.Shape(t); // русское название, прочитанное английским OCR
             foreach (var w in data.Weapons)
             {
-                foreach (var (ocrKey, key) in new[] { (lat, w.Key), (cyr, w.KeyRu) })
+                foreach (var (ocrKey, key) in new[] { (lat, w.Key), (cyr, w.KeyRu), (shape, w.KeyShape) })
                 {
                     if (ocrKey.Length < 2 || key.Length == 0) continue;
                     double s = TextUtil.Similarity(ocrKey, key);
@@ -361,9 +372,9 @@ sealed class Recognizer(OcrService ocr)
     /// </summary>
     Weapon? WeaponByIcon(Frame f, RectI button, Recognition rec)
     {
-        int bw = button.W, bh = button.H;
+        int bh = button.H, bw = Math.Max(button.W, (int)(4.9 * bh));
         var slot = RectI.FromLTRB(button.X - (int)(1.8 * bw), button.Y - (int)(9.6 * bh),
-                                  button.Right + (int)(0.45 * bw), button.Y - (int)(1.1 * bh)).Intersect(f.Bounds);
+                                  button.X + bw + (int)(0.45 * bw), button.Y - (int)(1.1 * bh)).Intersect(f.Bounds);
         if (slot.W < 40 || slot.H < 20) return null;
         int sw = slot.W, sh = slot.H;
         // Не сравниваем ценник (справа сверху), мини-иконку магазина (справа снизу) и подпись (снизу).
@@ -388,6 +399,53 @@ sealed class Recognizer(OcrService ocr)
     }
 
     Weapon? lastIconWeapon;
+
+    /// <summary>Какой движок OCR в прошлый раз нашёл меню (английская игра — английский).</summary>
+    bool englishFirst;
+
+    /// <summary>
+    /// Меню модулей по словам OCR: кнопки ячеек экипировки, выбранная (активная) кнопка и заголовок
+    /// раздела над ячейками обвесов. null — меню не видно (причина — в rec.Reason).
+    /// </summary>
+    (List<OcrWord> Words, List<OcrWord> Buttons, OcrWord Header, OcrWord Active, int H)? FindMenu(
+        Frame f, List<OcrLineText> lines, Recognition rec, string engine)
+    {
+        var words = lines.SelectMany(l => l.Words).ToList();
+        var mods = words.Where(w => TextUtil.IsModulesWord(w.Text) && !HiddenWords.Contains(w.Text)).ToList();
+        var ammo = words.Where(w => TextUtil.IsAmmoWord(w.Text)).ToList();
+        rec.Trace.Add($"OCR {engine}: слов {words.Count}, «МОДУЛИ»: {string.Join(" ", mods.Select(m => m.Box))}");
+
+        // Кнопка «МОДУЛИ» / «ATTC.» стоит в одном ряду с «БОЕПРИПАСЫ» / «AMMO» слева от неё.
+        // Заголовок раздела («МОДУЛИ» / «ATTACHMENTS») — ниже кнопок, без такого соседа.
+        bool IsButton(OcrWord w) => ammo.Any(a => Math.Abs(a.Box.CenterY - w.Box.CenterY) < w.Box.H && a.Box.X < w.Box.X && w.Box.X - a.Box.Right < 12 * w.Box.H);
+        var buttons = mods.Where(IsButton).ToList();
+        // Справа от «БОЕПРИПАСЫ» в том же ряду — только кнопка модулей, даже если OCR исказил её до
+        // неузнаваемости (английский движок читает «МОДУЛИ» то как «MOAYJIVI», то как «Moaym.l»).
+        buttons.AddRange(words.Where(w => !mods.Contains(w) && !ammo.Contains(w) && !HiddenWords.Contains(w.Text) &&
+                                          w.Text.Count(char.IsLetter) >= 3 && IsButton(w)));
+        var header = mods.Where(w => !buttons.Contains(w) && (buttons.Count == 0 || w.Box.Y > buttons.Max(b => b.Box.Bottom) - 2))
+                         .MaxBy(w => w.Box.Y);
+        // Соседа не прочитали — по-старому: заголовок самый нижний, кнопки выше.
+        if (buttons.Count == 0 && header != null) buttons = mods.Where(w => w != header && w.Box.Bottom <= header.Box.Y + 2).ToList();
+        if (buttons.Count == 0) { rec.Reason = "нет меню «Модули»"; return null; }
+        int h = Math.Max(8, header?.Box.H ?? buttons[0].Box.H * 7 / 8);
+        var active = buttons.Select(b => (b, frac: OrangeFraction(f, b.Box.Inflate(b.Box.H / 2, b.Box.H / 3))))
+                            .Where(t => t.frac > 0.2).OrderByDescending(t => t.frac).Select(t => t.b).FirstOrDefault();
+        // Пока выбран обвес, кнопка пушки бывает серой — тогда активная та, у которой текст яркий
+        // (у пустых ячеек экипировки он тусклый).
+        active ??= buttons.Select(b => (b, light: TextBrightness(f, b.Box))).Where(t => t.light >= 110)
+                          .OrderByDescending(t => t.light).Select(t => t.b).FirstOrDefault();
+        if (active == null) { rec.Reason = "не вижу выбранную ячейку экипировки (кнопку «МОДУЛИ» пушки)"; return null; }
+        if (header == null)
+        {
+            // Заголовок не прочитался (или называется иначе) — он всегда на одном месте под кнопками:
+            // левее активной кнопки на ~9 её высот и ниже на ~3.6 высоты.
+            int ab = active.Box.H;
+            header = new OcrWord("~", new RectI(active.Box.X - 9 * ab, active.Box.Y + (int)(3.6 * ab), 4 * ab, h));
+            rec.Trace.Add("заголовок раздела не прочитан — беру место под кнопками");
+        }
+        return (words, buttons, header, active, h);
+    }
 
     /// <summary>Яркость букв: 95-й перцентиль яркости в рамке слова.</summary>
     static int TextBrightness(Frame f, RectI r)

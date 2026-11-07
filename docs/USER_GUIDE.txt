@@ -44,9 +44,9 @@ Getting started
   1. Extract the ZIP from GitHub Releases to a writable folder and run the EXE.
      Release packages include the .NET Runtime. A FrameworkDependent build requires
      .NET 10 Desktop Runtime: https://dotnet.microsoft.com/download/dotnet/10.0.
-  2. Install the Russian language in Windows for menu text recognition.
-  3. Set the game interface to Russian and use borderless windowed mode.
-  4. Run WardogsOverlay.exe. Closing the settings window minimizes the application
+  2. Use borderless windowed mode in the game. The game interface can be English or
+     Russian; no additional Windows languages are required.
+  3. Run WardogsOverlay.exe. Closing the settings window minimizes the application
      to the tray next to the clock. Right-click the tray icon and choose Exit to quit.
 
 In-game hotkeys (active only while the game is in the foreground)
@@ -137,9 +137,9 @@ WARDOGS ОВЕРЛЕЙ — бафы и дебафы обвесов в меню �
   1. Распакуй готовый ZIP из GitHub Releases в отдельную папку и запусти EXE.
      Релизный пакет включает .NET Runtime. Для сборки с параметром FrameworkDependent
      нужен .NET 10 Desktop Runtime: https://dotnet.microsoft.com/download/dotnet/10.0.
-  2. В Windows должен быть русский язык (для распознавания текста меню).
-  3. В игре: русский язык интерфейса, режим экрана «Оконный без рамки».
-  4. Запусти WardogsOverlay.exe. Откроется окно с настройками; крестик сворачивает его в трей
+  2. В игре включи режим экрана «Оконный без рамки». Язык игры — русский или английский;
+     ставить дополнительные языки в Windows не нужно.
+  3. Запусти WardogsOverlay.exe. Откроется окно с настройками; крестик сворачивает его в трей
      (значок с прицелом у часов). Выход — правый клик по значку → «Выход».
 
 Клавиши в игре (работают, только пока игра на переднем плане; в других программах не перехватываются)

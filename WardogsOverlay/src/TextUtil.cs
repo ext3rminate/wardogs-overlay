@@ -62,11 +62,63 @@ static class TextUtil
         return m == 0 ? 0 : 1.0 - (double)Levenshtein(a, b) / m;
     }
 
-    /// <summary>Слово OCR совпадает с русским словом интерфейса (допускается одна ошибка).</summary>
+    /// <summary>
+    /// Слово OCR совпадает с русским словом интерфейса (допускается одна ошибка). Русский текст,
+    /// прочитанный английским OCR (в Windows нет русского языка распознавания), тоже узнаём —
+    /// по форме букв: «МОДУЛИ» английский движок читает как «MOAYJIVI».
+    /// </summary>
     public static bool IsUiWord(string ocr, string target)
     {
         var w = Cyrillize(ocr);
-        return Math.Abs(w.Length - target.Length) <= 1 && Levenshtein(w, target) <= 1;
+        if (Math.Abs(w.Length - target.Length) <= 1 && Levenshtein(w, target) <= 1) return true;
+        return ShapeMatches(ocr, target);
+    }
+
+    // Как английский OCR передаёт русские буквы (по начертанию шрифта игры).
+    static readonly Dictionary<char, string> CyrShape = new()
+    {
+        ['А'] = "A", ['Б'] = "6", ['В'] = "B", ['Г'] = "R", ['Д'] = "A", ['Е'] = "E", ['Ё'] = "E", ['Ж'] = "X",
+        ['З'] = "3", ['И'] = "VI", ['Й'] = "VI", ['К'] = "K", ['Л'] = "JI", ['М'] = "M", ['Н'] = "H", ['О'] = "O",
+        ['П'] = "N", ['Р'] = "P", ['С'] = "C", ['Т'] = "T", ['У'] = "Y", ['Ф'] = "O", ['Х'] = "X", ['Ц'] = "U",
+        ['Ч'] = "4", ['Ш'] = "LU", ['Щ'] = "LU", ['Ъ'] = "B", ['Ы'] = "BI", ['Ь'] = "B", ['Э'] = "3", ['Ю'] = "IO", ['Я'] = "R",
+    };
+
+    /// <summary>
+    /// «Скелет» строки по начертанию: русские буквы → как их видит английский OCR, похожие знаки
+    /// склеены (0/O/Q, 1/I/L/|/!/J). «ПП-19 «БИЗОН»» и «nn-19 «6VI3OH»» дают одно и то же.
+    /// </summary>
+    public static string Shape(string s)
+    {
+        var sb = new StringBuilder(s.Length + 4);
+        foreach (var ch0 in s.ToUpperInvariant())
+        {
+            if (CyrShape.TryGetValue(ch0, out var lat)) { foreach (var c in lat) Append(c); }
+            else Append(ch0);
+        }
+        return sb.ToString();
+
+        void Append(char c)
+        {
+            c = c switch
+            {
+                '0' or 'Q' or 'D' => 'O',
+                '1' or 'L' or '|' or '!' or 'J' or 'Ӏ' => 'I',
+                'U' or 'V' => 'V',
+                'F' => 'P',
+                _ => c,
+            };
+            if (c is >= 'A' and <= 'Z' or >= '0' and <= '9') sb.Append(c);
+        }
+    }
+
+    /// <summary>Похожи ли строки по начертанию (длинным словам прощается больше ошибок OCR).</summary>
+    public static bool ShapeMatches(string ocr, string targetRu)
+    {
+        var a = Shape(ocr);
+        var b = Shape(targetRu);
+        if (a.Length < 3) return false;
+        int allowed = b.Length <= 5 ? 0 : b.Length <= 8 ? 2 : b.Length / 3;
+        return Math.Abs(a.Length - b.Length) <= allowed && Levenshtein(a, b) <= allowed;
     }
 
     /// <summary>То же для английского интерфейса игры.</summary>
@@ -76,13 +128,19 @@ static class TextUtil
         return Math.Abs(w.Length - target.Length) <= 1 && Levenshtein(w, target) <= 1;
     }
 
-    // Как называются элементы меню в русской и английской версиях игры. Английские — предположение
-    // по смыслу (скриншота английского меню пока нет), поэтому перечислены варианты.
+    // Как называются элементы меню в русской и английской версиях игры. В английской кнопка
+    // модулей подписана «ATTC.», кнопка патронов — «AMMO», панель слотов — «EQUIPMENT SLOTS».
     public static bool IsModulesWord(string ocr) =>
-        IsUiWord(ocr, "МОДУЛИ") || IsUiWordEn(ocr, "MODULES") || IsUiWordEn(ocr, "ATTACHMENTS") || IsUiWordEn(ocr, "MODIFICATIONS");
+        IsUiWord(ocr, "МОДУЛИ") || IsAttcWord(ocr) || IsUiWordEn(ocr, "MODULES") || IsUiWordEn(ocr, "ATTACHMENTS");
+
+    /// <summary>Кнопка модулей в английской игре — короткое «ATTC.»: тут ошибок не прощаем, кроме T/I.</summary>
+    static bool IsAttcWord(string ocr) => Latinize(ocr).Replace('I', 'T') is "ATTC" or "ATC" or "ATTTC";
+
+    public static bool IsAmmoWord(string ocr) =>
+        IsUiWord(ocr, "БОЕПРИПАСЫ") || Latinize(ocr).Replace('0', 'O') is "AMMO" or "AMM0" or "AMNO" or "ANMO";
 
     public static bool IsSlotsWord(string ocr) =>
-        IsUiWord(ocr, "ЯЧЕЙКИ") || IsUiWordEn(ocr, "LOADOUT") || IsUiWordEn(ocr, "EQUIPMENT") || IsUiWordEn(ocr, "SLOTS");
+        IsUiWord(ocr, "ЯЧЕЙКИ") || IsUiWordEn(ocr, "EQUIPMENT") || IsUiWordEn(ocr, "SLOTS");
 
     /// <summary>Верхний регистр, латинские двойники → кириллица, буквы и цифры («AK-74» → «АК74»).</summary>
     public static string NormRu(string s)
