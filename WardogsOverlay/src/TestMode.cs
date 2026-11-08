@@ -77,6 +77,26 @@ static class TestMode
             }
             return 0;
         }
+        if (files.Length >= 2 && files[0] == "--clean-economy")
+        {
+            // Как прошлые сессии выглядят после очистки ложных показаний (файл не меняется).
+            var sessions = System.Text.Json.JsonSerializer.Deserialize<List<EconomySession>>(File.ReadAllText(files[1])) ?? [];
+            sessions = sessions.Where(x => !files.Contains("--details") || x == sessions[^1]).ToList();
+            foreach (var se in sessions)
+            {
+                var before = $"{se.Points.Count} точек, +{se.Earned} / −{se.Spent}, трат {se.Purchases.Count}";
+                Economy.Clean(se);
+                Console.WriteLine($"{se.Start:dd.MM HH:mm}: {before}  →  {se.Points.Count} точек, +{se.Earned} / −{se.Spent}, итог {se.Net:+#;−#;0}, трат {se.Purchases.Count}");
+                if (files.Contains("--details"))
+                {
+                    for (int i = 1; i < se.Points.Count; i++)
+                        if (se.Points[i].Balance < se.Points[i - 1].Balance - 2000)
+                            Console.WriteLine($"   {se.Points[i].Time:HH:mm:ss} {se.Points[i - 1].Balance} → {se.Points[i].Balance} (−{se.Points[i - 1].Balance - se.Points[i].Balance})");
+                    foreach (var pu in se.Purchases) Console.WriteLine($"   трата {pu.Time:HH:mm:ss} −{pu.Amount} {pu.What}");
+                }
+            }
+            return 0;
+        }
         if (files.Length >= 1 && files[0] == "--where") { Console.WriteLine($"data: {AppPaths.Root} (portable: {AppPaths.Portable})"); return 0; }
         if (files.Length >= 2 && files[0] == "--test-welcome")
         {
@@ -344,6 +364,17 @@ static class TestMode
         using (var z = System.IO.Compression.ZipFile.OpenRead(report))
             Check("отчёт о проблеме: архив с system.txt", z.Entries.Any(e => e.Name == "system.txt"), string.Join(", ", z.Entries.Select(e => e.FullName)));
         File.Delete(report);
+
+        // Два числа в углу вперемешку (баланс и заработок за сессию) и выброс неверной цифры — убираются,
+        // настоящая трата остаётся.
+        var mixed = new EconomySession();
+        var t0m = DateTime.Now.AddMinutes(-30);
+        int[] seq = [429004, 55668, 429164, 55828, 429324, 431993, 334742, 432153, 409643, 409803, 410000, 410160];
+        for (int i = 0; i < seq.Length; i++) mixed.Points.Add(new MoneyPoint(t0m.AddSeconds(20 * i), seq[i]));
+        Economy.Clean(mixed);
+        Check("второй счётчик и выброс убраны, трата −$22 510 осталась",
+              !mixed.Points.Any(pp => pp.Balance is 55668 or 55828 or 334742) && mixed.Spent == 22510,
+              $"+{mixed.Earned} / −{mixed.Spent}: {string.Join(", ", mixed.Points.Select(pp => pp.Balance))}");
 
         // Неверное первое показание ($304 вместо $304 060) не должно отравлять сессию.
         var ecoFix = new Economy();

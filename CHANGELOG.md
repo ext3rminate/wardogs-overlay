@@ -2,6 +2,11 @@
 
 ## English
 
+### 1.2.2 — 2026-11-08
+
+- Fixed absurd session totals (millions earned and spent): the top-right corner sometimes shows another number (session earnings — balance minus the balance at login) alternating with the balance, and both were recorded. Corner readings are now accepted only near the current balance; a new level is accepted after it holds for 90 seconds.
+- Temporary outliers are removed from the history — readings after which the balance returns to its previous level (the other counter, a misread digit) — together with the spending recorded at those moments. Existing history is cleaned once on start; real purchases stay.
+
 ### 1.2.1 — 2026-11-08
 
 - Money is tracked in real time: every 2 seconds the overlay reads the balance in the top-right corner — the money plaque during a match and the vendor's balance — so every income and every spend is recorded, not only vendor visits. A drop equal to the loadout cost shown at the vendor (the amount left of the balance) is recorded as a loadout purchase with the build it contained.
@@ -63,6 +68,11 @@
 ---
 
 ## Русский
+
+### 1.2.2 — 2026-11-08
+
+- Исправлены нелепые итоги сессии (миллионы заработано и потрачено): в правом верхнем углу иногда видно другое число (заработок за сессию — баланс минус баланс при входе) вперемешку с балансом, и записывались оба. Теперь показание из угла принимается, только если оно близко к текущему балансу; новый уровень — если держится полторы минуты.
+- Из истории убираются временные выбросы — показания, после которых баланс возвращается к прежнему уровню (другой счётчик, неверно прочитанная цифра), вместе с тратами, записанными в эти моменты. Уже записанная история чистится один раз при запуске; настоящие покупки остаются.
 
 ### 1.2.1 — 2026-11-08
 

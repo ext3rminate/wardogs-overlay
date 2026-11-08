@@ -395,7 +395,8 @@ sealed class Scanner : IDisposable
     int? vendorBalance;
     string? vendorWeapon;
     long nextMoney;
-    int? moneyCandidate;
+    int? moneyCandidate, suspect;
+    long suspectSince, lastNearAnchor;
     int? lastCart;
     string? lastKit;
 
@@ -411,6 +412,17 @@ sealed class Scanner : IDisposable
         if (b != moneyCandidate) { moneyCandidate = b; return; }
         // Стрельбище: там всегда $10 000 — не настоящие деньги.
         if (b == 10000 && Economy.LastBalance is int lb && lb != 10000) return;
+        // В углу бывает и другое число (заработок за сессию — баланс минус баланс при входе). Принимаем только
+        // близкое к текущему балансу; новый уровень — если держится полторы минуты без прежних значений.
+        long now = Environment.TickCount64;
+        if (Economy.LastBalance is int anchor && !Economy.Near(b, anchor))
+        {
+            if (suspect is not int sv || !Economy.Near(b, sv)) { suspect = b; suspectSince = now; }
+            if (now - suspectSince < 90_000 || now - lastNearAnchor < 90_000) return;
+            Log.Info($"Баланс сменился на новый уровень: {anchor} → {b}");
+        }
+        lastNearAnchor = now;
+        suspect = null;
         if (cart is int c and > 0) lastCart = c;
         OnBalance(b, null);
     }

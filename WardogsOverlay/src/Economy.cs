@@ -64,6 +64,8 @@ sealed class Economy
     public Economy()
     {
         history = Load();
+        // История, записанная прошлыми версиями, могла собрать ложные показания — чистим один раз при загрузке.
+        if (history.Aggregate(false, (any, s) => Clean(s) | any)) SaveLocked();
     }
 
     public IReadOnlyList<EconomySession> History
@@ -74,6 +76,61 @@ sealed class Economy
     /// <summary>Скачок баланса в разы — такое не заработать за один заход.</summary>
     public static bool IsJump(int prev, int cur) =>
         prev > 0 && (cur > prev * 8L + 50_000 || cur * 8L + 1000 < prev);
+
+    /// <summary>
+    /// Два показания — про один и тот же баланс: разница не больше $25 000 или 12%. Дальше — либо другое
+    /// число в углу экрана (игра показывает там и заработок за сессию), либо ошибка OCR.
+    /// </summary>
+    public static bool Near(int a, int b) => Math.Abs((long)a - b) <= Math.Max(25_000, Math.Max(a, b) * 0.12);
+
+    /// <summary>
+    /// Убрать из сессии ложные показания — временные выбросы, после которых баланс возвращается к прежнему
+    /// уровню: другое число в углу экрана (заработок за сессию) вперемешку с балансом или неверно прочитанная
+    /// цифра. Настоящая трата или заработок остаётся: после неё баланс не возвращается. Траты, записанные
+    /// в моменты выбросов, удаляются вместе с ними. lastFinal — сколько последних точек ещё не судим.
+    /// </summary>
+    public static bool Clean(EconomySession s, int lastFinal = 0)
+    {
+        var pts = s.Points;
+        int judge = Math.Max(0, pts.Count - lastFinal);
+        var keep = new List<MoneyPoint>();
+        var removed = new List<DateTime>();
+        for (int i = 0; i < pts.Count; i++)
+        {
+            if (i >= judge || keep.Count == 0) { keep.Add(pts[i]); continue; }
+            var anchor = keep[^1];
+            int v = pts[i].Balance, a = anchor.Balance;
+            long diff = Math.Abs((long)v - a);
+            // Мелкое изменение (заработок за тик, мелкая покупка) — настоящее, если только следом баланс не
+            // вернулся ровно к прежнему за минуту (неверно прочитанная цифра).
+            if (diff <= Math.Max(1000, a * 0.02))
+            {
+                bool exactBack = i + 1 < pts.Count && pts[i + 1].Balance == a && (pts[i + 1].Time - pts[i].Time).TotalSeconds < 60;
+                if (exactBack) removed.Add(pts[i].Time); else keep.Add(pts[i]);
+                continue;
+            }
+            // Сильно в стороне (другой счётчик) — выброс, если в ближайших 6 показаниях баланс снова около прежнего.
+            // Заметно в стороне (неверная цифра) — если в ближайших 3 вернулся почти точно.
+            bool far = !Near(v, a);
+            int look = far ? 6 : 3;
+            double back = far ? Math.Max(25_000, a * 0.05) : Math.Max(500, a * 0.005);
+            bool returns = pts.Skip(i + 1).Take(look).Any(p => Math.Abs((long)p.Balance - a) <= back
+                                                             && (p.Time - anchor.Time).TotalMinutes < (far ? 10 : 3));
+            if (returns) removed.Add(pts[i].Time);
+            else keep.Add(pts[i]);
+        }
+        if (removed.Count == 0) return false;
+        s.Points = keep;
+        // Трата остаётся, только если между соседними настоящими показаниями баланс правда упал на эту сумму.
+        bool Real(Purchase p)
+        {
+            for (int i = 1; i < keep.Count; i++)
+                if (Math.Abs((keep[i].Time - p.Time).TotalSeconds) < 5 && keep[i - 1].Balance - keep[i].Balance == p.Amount) return true;
+            return false;
+        }
+        s.Purchases = s.Purchases.Where(Real).ToList();
+        return true;
+    }
 
     /// <summary>
     /// Новое показание баланса. Одинаковые подряд и явные ошибки OCR отбрасываются.
@@ -103,9 +160,11 @@ sealed class Economy
             pending = null;
         accept:
             pts.Add(new MoneyPoint(DateTime.Now, balance));
+            // Ложное показание видно через несколько точек: вернулся ли баланс к прежнему уровню.
+            Clean(Current, lastFinal: 6);
             if (!history.Contains(Current)) history.Add(Current);
             // Второе показание — сессия впервые попадает в файл: сохраняем сразу, не дожидаясь 30 с.
-            if (pts.Count == 2 || Environment.TickCount64 - lastSave > 30_000) SaveLocked();
+            if (Current.Points.Count == 2 || Environment.TickCount64 - lastSave > 30_000) SaveLocked();
         }
         Changed?.Invoke();
     }
