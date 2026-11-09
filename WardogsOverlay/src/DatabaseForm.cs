@@ -126,7 +126,7 @@ sealed class DatabaseForm : Form
 
     Label Lbl(string text, float px, int weight = 400, Color? color = null, bool mono = false) => new()
     {
-        Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
+        Text = text, UseMnemonic = false, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
         Font = mono ? Theme.MonoFont(px, weight) : Theme.UiFont(px, weight), Margin = Padding.Empty,
     };
 
@@ -296,12 +296,12 @@ sealed class DatabaseForm : Form
         return page;
     }
 
-    void CompareWeapons(List<Weapon> ws)
+    internal Form? CompareWeapons(List<Weapon> ws)
     {
         if (ws.Count < 2)
         {
             MessageBox.Show(this, L.T("Выдели в таблице 2–4 пушки (Ctrl + клик).", "Select 2–4 weapons in the table (Ctrl + click)."), Text);
-            return;
+            return null;
         }
         var metrics = new List<(string Name, Func<Weapon, double?> Get, bool LowerBetter, string Fmt)>
         {
@@ -347,6 +347,7 @@ sealed class DatabaseForm : Form
         f.Controls.Add(GridCard(g));
         f.Controls.Add(note);
         f.Show(this);
+        return f;
     }
 
     void ShowWeapon(Weapon w)
@@ -1578,7 +1579,7 @@ sealed class DatabaseForm : Form
         body.SizeChanged += (_, _) => card.Height = body.Height + card.Padding.Vertical;
         Label L1(string text, float px, int weight, Color color) => new()
         {
-            Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = color, Font = Theme.UiFont(px, weight),
+            Text = text, UseMnemonic = false, AutoSize = true, BackColor = Color.Transparent, ForeColor = color, Font = Theme.UiFont(px, weight),
             Margin = new Padding(0, 0, 0, Sc(6)), MaximumSize = new Size(card.Width - Sc(36), 0),
         };
         body.Controls.Add(L1(L.T("ОФИЦИАЛЬНО · STEAM · ", "OFFICIAL · STEAM · ") + post.Date.ToString("d MMMM yyyy", L.Ru ? System.Globalization.CultureInfo.GetCultureInfo("ru-RU") : System.Globalization.CultureInfo.InvariantCulture).ToUpperInvariant(),

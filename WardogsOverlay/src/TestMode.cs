@@ -290,7 +290,7 @@ static class TestMode
         model.Money = L.T("сессия +$22 700 · $567/мин", "session +$22 700 · $567/min");
         int life = model.LifeCost ?? 0;
         model.Life = $"≈ {L.Money(life)}" + L.T($" · запас {24800 / Math.Max(1, life)} · окуп. {(int)Math.Ceiling(life / 567.0)} мин",
-                                                $" · {24800 / Math.Max(1, life)} in reserve · pays back in {(int)Math.Ceiling(life / 567.0)} min");
+                                                $" · {24800 / Math.Max(1, life)} rebuys · payback {(int)Math.Ceiling(life / 567.0)} min");
         float u = 600f / OverlayRenderer.Measure(model, 1f).Width;
         var size = OverlayRenderer.Measure(model, u);
         using var bmp = new Bitmap(size.Width, size.Height);
@@ -532,6 +532,19 @@ static class TestMode
             var path = Path.Combine(outDir, $"db_{DatabaseForm.PageKeys[i]}{(en ? "_en" : "")}.png");
             bmp.Save(path);
             Console.WriteLine($"→ {path}");
+        }
+        // Окно сравнения пушек (для руководства).
+        var cmpW = new[] { "ak74", "m4", "galil" }.Select(s => data.Weapons.FirstOrDefault(w => w.Slug == s)).OfType<Weapon>().ToList();
+        if (form.CompareWeapons(cmpW) is { } cf)
+        {
+            var until2 = Environment.TickCount64 + 700;
+            while (Environment.TickCount64 < until2) { Application.DoEvents(); Thread.Sleep(10); }
+            using var cbmp = new Bitmap(cf.Width, cf.Height);
+            cf.DrawToBitmap(cbmp, new Rectangle(0, 0, cf.Width, cf.Height));
+            var cpath = Path.Combine(outDir, $"db_compare{(en ? "_en" : "")}.png");
+            cbmp.Save(cpath);
+            Console.WriteLine($"→ {cpath}");
+            cf.Close();
         }
         form.Close();
         return 0;

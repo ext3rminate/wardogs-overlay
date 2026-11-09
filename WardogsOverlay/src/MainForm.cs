@@ -107,7 +107,7 @@ sealed class MainForm : Form
 
     Label Lbl(string text, float px, int weight = 400, Color? color = null, bool mono = false) => new()
     {
-        Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
+        Text = text, UseMnemonic = false, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
         Font = mono ? Theme.MonoFont(Math.Max(14, px), weight) : Theme.UiFont(Math.Max(14, px), weight), Margin = Padding.Empty,
     };
 
@@ -389,7 +389,7 @@ sealed class MainForm : Form
         {
             var l = new LinkLabel
             {
-                Text = text, AutoSize = true, LinkColor = Theme.Accent, ActiveLinkColor = Color.FromArgb(255, 194, 97), VisitedLinkColor = Theme.Accent,
+                Text = text, UseMnemonic = false, AutoSize = true, LinkColor = Theme.Accent, ActiveLinkColor = Color.FromArgb(255, 194, 97), VisitedLinkColor = Theme.Accent,
                 LinkBehavior = LinkBehavior.HoverUnderline, Font = Theme.UiFont(12, 500), BackColor = Theme.Bg, Margin = new Padding(Sc(12), Sc(4), 0, 0),
             };
             l.LinkClicked += (_, _) => a();

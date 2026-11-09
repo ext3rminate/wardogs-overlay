@@ -78,7 +78,7 @@ sealed class WelcomeForm : Form
 
     Label Lbl(string text, float px, int weight = 400, Color? color = null) => new()
     {
-        Text = text, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
+        Text = text, UseMnemonic = false, AutoSize = true, BackColor = Color.Transparent, ForeColor = color ?? Theme.Text,
         Font = Theme.UiFont(px, weight), Margin = new Padding(0, 0, 0, Sc(6)), MaximumSize = new Size(Sc(520), 0),
     };
 

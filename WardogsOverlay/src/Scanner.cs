@@ -327,12 +327,12 @@ sealed class Scanner : IDisposable
             if (balance is int b)
             {
                 int lives = b / life;
-                model.Life += L.T($" · запас {lives}", $" · {lives} in reserve");
+                model.Life += L.T($" · запас {lives}", $" · {lives} rebuys");
                 model.LifeWarn = lives < 3;
             }
             // Окупаемость: сколько минут игры при твоём среднем темпе отбивают эту сборку.
             if (Economy.AverageRate is double rate and > 0)
-                model.Life += L.T($" · окуп. {Math.Max(1, (int)Math.Ceiling(life / rate))} мин", $" · pays back in {Math.Max(1, (int)Math.Ceiling(life / rate))} min");
+                model.Life += L.T($" · окуп. {Math.Max(1, (int)Math.Ceiling(life / rate))} мин", $" · payback {Math.Max(1, (int)Math.Ceiling(life / rate))} min");
         }
         float u = (float)(client.H / 1080.0 * settings.OverlayScale);
         int x = client.X + rec.AnchorX + settings.OverlayOffsetX;
