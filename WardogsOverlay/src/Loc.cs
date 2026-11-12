@@ -50,9 +50,17 @@ static class L
 
     public static readonly string[] Roles = ["Career", "Infantry", "Medic", "Recon", "Support", "Driver", "Pilot"];
 
-    public static string UnlockText(Unlock? u) =>
-        u == null ? "—" : u.Level <= 0 ? T("сразу", "from start")
-        : $"{Role(u.Role)} {u.Level}" + (u.Cash > 0 ? $" · ${u.Cash:N0}" : "");
+    /// <summary>«Штурмовик 8 · $12,500», с другими ветками через «/» и пометкой о Сезоне 3, если она есть.</summary>
+    public static string UnlockText(Unlock? u)
+    {
+        if (u == null) return "—";
+        if (u.Level <= 0) return T("сразу", "from start");
+        var s = TracksText(u) + (u.Cash > 0 ? $" · ${u.Cash:N0}" : "");
+        return u.Note is { } n ? $"{s} · {T(n.Ru, n.En)}" : s;
+    }
+
+    /// <summary>Ветки открытия без цены: «Водитель 35 / Карьера 200».</summary>
+    public static string TracksText(Unlock u) => string.Join(" / ", u.Tracks.Where(t => t.Level > 0).Select(t => $"{Role(t.Role)} {t.Level}"));
 
     public static string Money(int v) => "$" + v.ToString("N0", Ru ? System.Globalization.CultureInfo.GetCultureInfo("ru-RU")
                                                                    : System.Globalization.CultureInfo.InvariantCulture);
@@ -138,6 +146,9 @@ static class L
         if (joined == "unlock/level") return T("уровень открытия", "unlock level");
         if (joined == "unlock/cash") return T("стоимость открытия", "unlock cost");
         if (joined == "unlock/role") return T("роль для открытия", "unlock role");
+        if (joined == "unlock/also") return T("открывается также в ветке", "also unlocks in track");
+        if (joined == "muzzleVelocity") return T("скорость пули", "projectile speed");
+        if (joined == "inVendor") return T("в продаже", "sold by vendor");
         if (joined == "price") return T("цена", "price");
         if (joined == "fits") return T("к каким пушкам подходит", "compatible weapons");
         if (joined == "gridSize") return T("размер в инвентаре", "inventory size");

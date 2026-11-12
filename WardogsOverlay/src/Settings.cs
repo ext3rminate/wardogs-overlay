@@ -40,6 +40,11 @@ sealed class Settings
     public bool ShowLifeCost { get; set; } = true;
     public int MyArmour { get; set; } = 2;
     /// <summary>
+    /// Играю в режиме Limited (Сезон 3): у продавца нет патронов HP и AP, брони и шлемов 3–4-го уровня —
+    /// оценки и подбор считают только обычные патроны и броню до 2-го уровня.
+    /// </summary>
+    public bool LimitedMode { get; set; }
+    /// <summary>
     /// Уровни ролей игрока (Career, Infantry, Medic…): у каждой роли свой уровень, качаются они
     /// независимо. Задаются в «Прогрессе»; пусто — уровни не указаны, ничего не отсекаем.
     /// </summary>

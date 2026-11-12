@@ -2,6 +2,16 @@
 
 ## English
 
+### 1.3.0 — 2026-11-12
+
+Season 3 (game update 0.3.0).
+
+- Until MetaForge publishes Season 3 data, the overlay applies what the official patch notes state as numbers on top of the Season 2 data: parachute, Wolf-110 [M2 Browning], Kodiak [M249], AH-6M and Havoc prices; Molotov ($12,500, Assault 8), C4 (Assault 5), Large Hammer (Support 14), Verba (Support 8), AMR 50 (Recon 41) and tank (Driver 35/50, WARDOG 200) unlocks; item weights; assault rifle and LMG torso damage (upper +13%, middle and lower +3%); 50% faster bow arrows; the Infrared Range Finder is no longer sold. Each correction applies only while the data still has the old value, so they switch off by themselves once MetaForge updates. The Patch page lists them as "Season 3 · from the official patch notes".
+- Multi-track unlocks: an item can unlock in several role tracks. "Unlocked only", Budget loadout, Progression (the item appears in every track) and Goal (the nearest track at your levels) take this into account, and MetaForge data in the new format is read as well. Armour, backpacks, vests and parachutes ("S3: role tracks too") and HP/AP ammo ("S3: moved") are marked where the notes give no exact levels.
+- Limited mode: a toggle on the main window, the Combat page and Budget loadout. Shots to kill use standard rounds only and armour up to level 2; HP/AP and level 3–4 armour are shown as not sold; purchases are not matched to items Limited mode doesn't sell.
+- Vendor discounts (the new catch-up discount and the losing-faction discount): a purchase cheaper than the catalogue price (up to half off) is recognized by the item name on screen or the picture above the price tag, and shown as "(20% off)".
+- The Combat page warns that Season 3 DMR damage and TCX-SPR recoil changes have no published numbers yet, so those figures are still from Season 2.
+
 ### 1.2.2 — 2026-11-08
 
 - Fixed absurd session totals (millions earned and spent): the top-right corner sometimes shows another number (session earnings — balance minus the balance at login) alternating with the balance, and both were recorded. Corner readings are now accepted only near the current balance; a new level is accepted after it holds for 90 seconds.
@@ -68,6 +78,16 @@
 ---
 
 ## Русский
+
+### 1.3.0 — 2026-11-12
+
+Сезон 3 (обновление игры 0.3.0).
+
+- Пока MetaForge не выложил данные Сезона 3, оверлей применяет поверх базы Сезона 2 то, что в официальных заметках к патчу названо числами: цены парашютов, Wolf-110 [M2 Browning], Kodiak [M249], AH-6M и Havoc; открытие коктейля Молотова ($12 500, штурмовик 8), C4 (штурмовик 5), большого молота (поддержка 14), «Вербы» (поддержка 8), AMR 50 (разведчик 41) и танков (водитель 35/50, карьера 200); веса предметов; урон штурмовых винтовок и пулемётов по торсу (верх +13%, середина и низ +3%); стрелы лука на 50% быстрее; ИК-дальномер больше не продаётся. Каждая поправка применяется, только пока в данных прежнее значение, поэтому после обновления MetaForge они отключатся сами. В разделе «Патч» они видны как «Season 3 · по официальным заметкам».
+- Открытие в нескольких ветках: предмет может открываться в ветках разных ролей. Это учитывают «Только открытое», «Сборка под бюджет», «Прогресс» (предмет виден в каждой ветке) и «Цель» (ближайшая ветка по твоим уровням); данные MetaForge в новом виде тоже читаются. Броня, рюкзаки, разгрузки и парашюты («S3: и в ветках ролей») и патроны HP/AP («S3: перенесено») помечены там, где точных уровней в заметках нет.
+- Режим Limited: переключатель в главном окне, в разделе «Бой» и в «Сборке под бюджет». Выстрелы до убийства считаются только обычными патронами и против брони не выше 2-го уровня; HP/AP и броня 3–4-го уровня показаны как «не продают»; покупки не приписываются тому, чего в Limited нет.
+- Скидки продавца (новая догоняющая и для отстающей фракции): покупка дешевле каталожной цены (не больше чем вдвое) узнаётся по названию предмета на экране или картинке над ценником и подписывается «(скидка 20%)».
+- В разделе «Бой» предупреждение: изменения урона DMR и отдачи TCX-SPR в Сезоне 3 без опубликованных чисел, поэтому эти цифры пока по Сезону 2.
 
 ### 1.2.2 — 2026-11-08
 

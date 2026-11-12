@@ -393,7 +393,8 @@ static class TestMode
         Check("скачок со стрельбища не заработок", s.Earned == 51391 && s.Net == 51391, $"{s.Earned} / {s.Net}");
         Check("скачок в разы — IsJump", Economy.IsJump(10000, 324935) && !Economy.IsJump(324935, 376326));
 
-        var data = GameData.Load();
+        // Модель и цифры ниже сверены с MetaForge — проверяем на данных как есть, без поправок из заметок к патчу.
+        var data = GameData.Load(corrections: false);
         var m500 = data.Weapons.FirstOrDefault(w => w.Pellets > 1);
         Check("у дробовика 8 дробин", m500 != null && m500.Pellets == 8, m500 == null ? "нет" : $"{m500.Name} ×{m500.Pellets}");
         if (m500 != null && Combat.TtkChest(data, m500, 0) is { } ttk) Check("дробовик без брони убивает за 1–2 выстрела", ttk.Shots <= 2, $"{ttk.Shots}");
@@ -476,6 +477,8 @@ static class TestMode
             Check("боковой прицел не перебивает зум основного", Math.Abs(zoom - scope.Zoom!.Value) < 1e-6, $"{zoom} при {scope.Zoom}");
         }
 
+        SelfCheckSeason3(data, (n, ok, d) => Check(n, ok, d ?? ""));
+
         var many = data.Weapons.First(w => w.Slots.Length > 2);
         var sw = Stopwatch.StartNew();
         var best = Builds.Best(data, many, [], Priority.Balance, 9_999_999);
@@ -483,6 +486,89 @@ static class TestMode
 
         Console.WriteLine(fails == 0 ? "всё ок" : $"провалов: {fails}");
         return fails == 0 ? 0 : 1;
+    }
+
+    /// <summary>Сезон 3: поправки из официальных заметок, мульти-трековые открытия, режим Limited, скидки продавца.</summary>
+    static void SelfCheckSeason3(GameData raw, Action<string, bool, string?> check)
+    {
+        void Check(string name, bool ok, string? detail = null) => check(name, ok, detail);
+
+        // Открытие в нескольких ветках — в любом из видов, в котором его может выложить MetaForge.
+        Unlock? U(string json) { using var doc = System.Text.Json.JsonDocument.Parse(json); return GameData.ReadUnlock(doc.RootElement); }
+        var u1 = U("""{"unlock":{"role":"Career","level":30,"cash":50000,"tracks":[{"role":"Infantry","level":12}]}}""");
+        Check("открытие: ветки внутри объекта", u1 is { Role: "Career", Level: 30, Cash: 50000, Also.Length: 1 } && u1.Also[0] is { Role: "Infantry", Level: 12 },
+              u1 == null ? "null" : L.UnlockText(u1));
+        var u2 = U("""{"unlock":[{"role":"Driver","level":35,"cash":250000},{"role":"Career","level":200}]}""");
+        Check("открытие: список веток", u2 is { Role: "Driver", Level: 35, Also.Length: 1 }, u2 == null ? "null" : L.UnlockText(u2));
+        var u3 = U("""{"unlock":{"level":0}}""");
+        Check("открытие «сразу» читается как раньше", u3 is { Level: 0, Also.Length: 0 });
+        var lv = L.Roles.ToDictionary(r => r, _ => 1);
+        lv["Infantry"] = 12;
+        Check("хватает любой ветки открытия", u1 != null && Builds.Unlocked(u1, lv) && !Builds.Unlocked(u1 with { Also = [] }, lv));
+        Check("ближайшая ветка — та, где меньше уровней", u1 != null && Builds.NearestTrack(u1, lv).Role == "Infantry");
+
+        if (!Season3.IsBefore(raw))
+        {
+            Console.WriteLine("  (база уже Сезона 3 — поправки из заметок не применяются)");
+            Check("на новой базе поправки не применяются", !GameData.Load().FromPatchNotes);
+        }
+        else
+        {
+            var s3 = GameData.Load();
+            DbItem Item(GameData d, string slug) => d.Items.First(i => i.Slug == slug);
+            Check("база Сезона 2 → поправки Сезона 3", s3.FromPatchNotes && s3.PatchTitle == Season3.Title && s3.PatchBuild == Season3.Build && s3.Patch.Count > 10,
+                  $"{s3.PatchTitle} {s3.PatchBuild}, изменений {s3.Patch.Count}");
+            var molotov = Item(s3, "molotov-cocktail").Unlock;
+            Check("коктейль Молотова: штурмовик 8, $12 500", molotov is { Level: 8, Cash: 12500 }, L.UnlockText(molotov));
+            Check("парашюты: $1 250 и $2 250", Item(s3, "basic-parachute").Price == 1250 && Item(s3, "sport-parachute").Price == 2250);
+            Check("Havoc $26 000, AH-6M $10 480", Item(s3, "havoc").Price == 26000 && Item(s3, "ah-6m-miniguns").Price == 10480);
+            Check("Verba — поддержка 8, большой молот — 14",
+                  s3.Weapons.First(w => w.Slug == "9k333-verba").Unlock?.Level == 8 && Item(s3, "9k333-verba").Unlock?.Level == 8 && Item(s3, "large-hammer").Unlock?.Level == 14);
+            Check("ИК-дальномер снят с продажи", !Item(s3, "infrared-range-finder").InVendor && s3.Patch.Any(p => p.Removed && p.Name == "Infrared Range Finder"));
+            Check("стрелы лука на 50% быстрее", s3.Weapons.First(w => w.Slug == "compound-bow").Velocity == 240);
+            var t72 = Item(s3, "t-72b3").Unlock!;
+            Check("T-72B3: водитель 35 или карьера 200", t72.Level == 35 &&
+                  Builds.Unlocked(t72, new() { ["Driver"] = 35 }) && Builds.Unlocked(t72, new() { ["Career"] = 200, ["Driver"] = 1 }) &&
+                  !Builds.Unlocked(t72, new() { ["Career"] = 150, ["Driver"] = 34 }), L.UnlockText(t72));
+            Check("броня помечена: в S3 открывается и в ветках ролей", Item(s3, "level-2-armor").Unlock?.Note != null, L.UnlockText(Item(s3, "level-2-armor").Unlock));
+
+            var ak3 = s3.Weapons.First(w => w.Slug == "ak74");
+            var akRaw = raw.Weapons.First(w => w.Slug == "ak74");
+            double Hit(GameData d, Weapon w, string zone) => Combat.PerHit(d, w, zone, RoundLoad.FMJ, 0, 0, 0, out _);
+            double up = Hit(s3, ak3, "torso_upper") / Hit(raw, akRaw, "torso_upper"), mid = Hit(s3, ak3, "torso_middle") / Hit(raw, akRaw, "torso_middle");
+            Check("штурмовые: верх торса +13%, середина +3%", Math.Abs(up - 1.13) < 0.005 && Math.Abs(mid - 1.03) < 0.005, $"{up:0.000} / {mid:0.000}");
+            var lmg = s3.Weapons.FirstOrDefault(w => w.Sub == "Light Machine Gun");
+            Check("пулемёты по торсу — как штурмовые", lmg == null || lmg.Hit.GetValueOrDefault("torso_upper") == ak3.Hit.GetValueOrDefault("torso_upper"));
+            Check("исходные данные не тронуты", akRaw.Hit["torso_upper"] < 1.0 && raw.Items.First(i => i.Slug == "basic-parachute").Price == 500);
+            var svd = s3.Weapons.FirstOrDefault(w => w.Slug == "svd");
+            Check("DMR: предупреждение, что чисел Сезона 3 ещё нет", svd == null || Season3.PendingNote(s3, svd) != null);
+
+            // Поправки не накладываются дважды: если MetaForge обновит цены раньше журнала патчей, «было» уже не совпадёт.
+            var twice = GameData.Load();
+            twice.PatchBuild = "CL-516586";
+            int before = twice.Patch.Count;
+            Season3.Apply(twice);
+            Check("повторное применение ничего не меняет", twice.Weapons.First(w => w.Slug == "ak74").Hit["torso_upper"] == 1.1 &&
+                  twice.Items.First(i => i.Slug == "basic-parachute").Price == 1250 && twice.Patch.Count == before);
+        }
+
+        // Режим Limited: нет HP и AP, брони и шлемов 3–4-го уровня, ударной техники.
+        var ak = raw.Weapons.First(w => w.Slug == "ak74");
+        var kl = OverlayModel.KillLine(raw, ak, 4, 50, limited: true);
+        Check("Limited: плашка считает броню 2 и только FMJ", kl is { } k && k.Where.Contains('2') && k.Where.Contains("Limited") && !k.What.Contains("AP") && !k.What.Contains("HP"),
+              kl is { } x ? $"{x.Where}: {x.What}" : "null");
+        Check("Limited: броня 3 и AP не продаются, броня 2 и Kodiak — да",
+              Season3.LimitedExcludes(raw.Items.First(i => i.Slug == "level-3-armor")) && !Season3.LimitedExcludes(raw.Items.First(i => i.Slug == "level-2-armor")) &&
+              raw.Items.Where(i => i.Tab == "ammunition" && i.RoundType?.Contains("(AP)") == true).All(Season3.LimitedExcludes) &&
+              Season3.LimitedExcludes(raw.Items.First(i => i.Slug == "kodiak-m249")) && !Season3.LimitedExcludes(raw.Items.First(i => i.Slug == "kodiak")));
+
+        // Скидка продавца: бронежилет 2-го уровня за 80% цены, название на экране.
+        var vest = raw.Items.First(i => i.Slug == "level-2-armor");
+        int paid = (int)(vest.Price!.Value * 0.8);
+        var (what, _) = PurchaseMatcher.Attribute(raw, paid, null, [], null, [], [vest.Name]);
+        Check("покупка со скидкой узнаётся по названию на экране", what.Contains(L.Name(vest)) && what.Contains("20"), what);
+        var (blind, _) = PurchaseMatcher.Attribute(raw, paid, null, [], null, [], []);
+        Check("без подтверждения на экране скидку не угадываем", !blind.Contains("20%"), blind);
     }
 
     static int TestDatabase(string outDir, bool en)

@@ -625,7 +625,10 @@ sealed class DatabaseForm : Form
     Control ProgressPage()
     {
         var page = Page();
-        var items = data.Items.Where(i => i.Unlock is { Level: > 0 } && i.Unlock.Role is { } r && r != "None").ToList();
+        // С Сезона 3 предмет может открываться в нескольких ветках — показываем его в каждой, со своим уровнем.
+        var items = data.Items.Where(i => i.Unlock != null)
+            .SelectMany(i => i.Unlock!.Tracks.Where(t => t.Level > 0 && t.Role is { } r && r != "None").Select(t => (Item: i, Track: t)))
+            .DistinctBy(x => (x.Item.Id, x.Track.Role)).ToList();
         var chips = new ChipBar { Dock = DockStyle.Top, Items = L.Roles.Select(L.Role).ToArray() };
         // У каждой роли свой уровень (карьера и классы качаются независимо) — храним и показываем по роли.
         var levels = settings?.RoleLevels ?? [];
@@ -658,12 +661,12 @@ sealed class DatabaseForm : Form
         var summary = new PaintBox { Dock = DockStyle.Right, Width = Sc(300) };
         var nameF = Theme.UiFont(14, 500); var secF = Theme.UiFont(11); var costF = Theme.MonoFont(13); var nodeF = Theme.MonoFont(13, 600);
         var sumTitle = Theme.UiFont(12, 600); var sumBig = Theme.MonoFont(30, 600); var sumSm = Theme.UiFont(13);
-        List<(int Level, List<DbItem> Items)> rows = [];
+        List<(int Level, List<(DbItem Item, Unlock Track)> Items)> rows = [];
 
         void Fill()
         {
             var role = L.Roles[chips.SelectedIndex];
-            rows = items.Where(i => i.Unlock!.Role == role).GroupBy(i => i.Unlock!.Level).OrderBy(g => g.Key)
+            rows = items.Where(x => x.Track.Role == role).GroupBy(x => x.Track.Level).OrderBy(g => g.Key)
                         .Select(g => (g.Key, g.ToList())).ToList();
             timeline.Height = Sc(16) + rows.Sum(r => Sc(20 + 26 * r.Items.Count));
             cap.Text = L.T($"Мой уровень · {L.Role(role)}", $"My level · {L.Role(role)}");
@@ -694,7 +697,7 @@ sealed class DatabaseForm : Form
                 Theme.Draw(g, lvl.ToString(), nodeF, current ? Theme.AccentInk : next ? Theme.Accent : Theme.Muted, node, Theme.Align.Center);
                 float ty = y + b.S(12);
                 var textColor = done && !current ? Theme.Faint : Theme.Text;
-                foreach (var it in its)
+                foreach (var (it, track) in its)
                 {
                     var nm = L.Name(it);
                     float tx = x + b.S(52);
@@ -705,7 +708,9 @@ sealed class DatabaseForm : Form
                     var sr = new RectangleF(tx + nw + b.S(12), ty + b.S(2), sw, b.S(20));
                     Theme.FillRound(g, Theme.Chip, sr, b.S(6));
                     Theme.Draw(g, sec, secF, Theme.Muted, sr, Theme.Align.Center);
-                    Theme.Draw(g, it.Unlock!.Cash > 0 ? L.Money(it.Unlock.Cash) : "—", costF, next ? Theme.Accent : Theme.Muted,
+                    // У дополнительной ветки цена открытия в данных может быть не указана — тогда берём основную.
+                    int cash = track.Cash > 0 ? track.Cash : it.Unlock!.Cash;
+                    Theme.Draw(g, cash > 0 ? L.Money(cash) : "—", costF, next ? Theme.Accent : Theme.Muted,
                                new RectangleF(x, ty, b.Width - x - b.S(20), b.S(24)), Theme.Align.Right);
                     ty += b.S(26);
                 }
@@ -715,8 +720,8 @@ sealed class DatabaseForm : Form
         summary.Painter = (g, b) =>
         {
             g.Clear(Theme.Bg);
-            var next = rows.Where(r => r.Level > level && r.Level <= level + 5).SelectMany(r => r.Items.Select(i => (r.Level, i))).ToList();
-            int sum = next.Sum(n => n.i.Unlock!.Cash);
+            var next = rows.Where(r => r.Level > level && r.Level <= level + 5).SelectMany(r => r.Items.Select(x => (r.Level, i: x.Item, x.Track))).ToList();
+            int sum = next.Sum(n => n.Track.Cash > 0 ? n.Track.Cash : n.i.Unlock!.Cash);
             float h = b.S(150 + 26 * Math.Min(next.Count, 8));
             var card = new RectangleF(b.S(16), 0, b.Width - b.S(16), h);
             Theme.FillRound(g, Theme.Panel, card, b.S(16));
@@ -730,7 +735,7 @@ sealed class DatabaseForm : Form
             y += b.S(30);
             using (var p = new Pen(Theme.Line)) g.DrawLine(p, x, y, x + w, y);
             y += b.S(10);
-            foreach (var (lvl, it) in next.Take(8))
+            foreach (var (lvl, it, _) in next.Take(8))
             {
                 Theme.Draw(g, L.T($"Ур. {lvl}", $"Lv. {lvl}"), sumSm, Theme.Muted, new RectangleF(x, y, b.S(60), b.S(24)));
                 Theme.Draw(g, L.Name(it), sumSm, Theme.Text, new RectangleF(x + b.S(60), y, w - b.S(60), b.S(24)), Theme.Align.Right);
@@ -831,6 +836,17 @@ sealed class DatabaseForm : Form
         levelsHint.MaximumSize = new Size(iw, 0);
         levelsHint.Margin = new Padding(0, 0, 0, Sc(14));
         stack.Controls.Add(levelsHint);
+        // Режим Limited (Сезон 3): броня и шлемы 3–4-го уровня не продаются.
+        var limRow = new TableLayoutPanel { ColumnCount = 2, Width = iw, Height = Sc(30), BackColor = Theme.Panel, Margin = new Padding(0, 0, 0, Sc(14)) };
+        limRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        limRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Sc(48)));
+        var limLbl = Lbl(L.T("Режим Limited", "Limited mode"), 13, 500);
+        limLbl.Anchor = AnchorStyles.Left;
+        var limited = new Toggle { Size = new Size(Sc(44), Sc(26)), Anchor = AnchorStyles.Right, Checked = settings?.LimitedMode ?? false };
+        limited.CheckedChanged += (_, _) => { if (settings != null) { settings.LimitedMode = limited.Checked; settings.NotifyChanged(); } };
+        limRow.Controls.Add(limLbl, 0, 0);
+        limRow.Controls.Add(limited, 1, 0);
+        stack.Controls.Add(limRow);
         // Те же уровни, что видны в «Прогрессе»: не указанная роль — 1-й уровень.
         void LevelsHint()
         {
@@ -870,15 +886,21 @@ sealed class DatabaseForm : Form
                 : new[] { $"level-{req.ArmourLevel}-armor", $"level-{req.ArmourLevel}-helmet" }
                     .Select(sl => data.Items.FirstOrDefault(i => i.Slug == sl))
                     .FirstOrDefault(i => i != null && !Builds.Unlocked(i.Unlock, req.Levels));
-            List<Builds.Loadout> list = lockedGear != null ? [] : Builds.BestLoadouts(data, req, 6);
+            bool noLimitedGear = limited.Checked && req.ArmourLevel > Season3.LimitedMaxArmour;
+            List<Builds.Loadout> list = lockedGear != null || noLimitedGear ? [] : Builds.BestLoadouts(data, req, 6);
             results.SuspendLayout();
             ClearControls(results);
             int width = Math.Max(Sc(420), results.ClientSize.Width - Sc(36));
             if (list.Count == 0)
             {
-                var none = Lbl(lockedGear != null
-                    ? L.T($"{L.Name(lockedGear)} ещё не открыт по твоим уровням ({L.UnlockText(lockedGear.Unlock)}). Выбери броню пониже.",
-                          $"{L.Name(lockedGear)} is not unlocked at your levels ({L.UnlockText(lockedGear.Unlock)}). Pick lower armour.")
+                var none = Lbl(noLimitedGear
+                    ? L.T($"В режиме Limited броню и шлемы {req.ArmourLevel}-го уровня не продают — выбери до {Season3.LimitedMaxArmour}-го.",
+                          $"Level {req.ArmourLevel} armour and helmets aren't sold in Limited mode — pick level {Season3.LimitedMaxArmour} or lower.")
+                    : lockedGear != null
+                    ? L.T($"{L.Name(lockedGear)} ещё не открыт по твоим уровням ({L.UnlockText(lockedGear.Unlock)}). Выбери броню пониже" +
+                          (lockedGear.Unlock?.Note != null ? " — или, если в Сезоне 3 ты уже открыл её в ветке своей роли, выключи «Только открытое»." : "."),
+                          $"{L.Name(lockedGear)} is not unlocked at your levels ({L.UnlockText(lockedGear.Unlock)}). Pick lower armour" +
+                          (lockedGear.Unlock?.Note != null ? " — or, if you already unlocked it in your role track in Season 3, turn off «Unlocked only»." : "."))
                     : req.Levels != null
                         ? L.T("Ничего не подходит: не хватает бюджета или нужное ещё не открыто по твоим уровням. Увеличь бюджет, убери прицел или броню.",
                               "Nothing fits: the budget is too low or what's needed isn't unlocked at your levels. Raise the budget or drop the optic/armour.")
@@ -1156,7 +1178,7 @@ sealed class DatabaseForm : Form
             int cost = u.Cash;
             Theme.Draw(g, L.Name(goal), Theme.UiFont(16, 700), Theme.Text, new RectangleF(x, y, w, b.S(24)));
             y += b.S(28);
-            Theme.Draw(g, L.T($"Открыть: {L.Money(cost)} · {L.Role(u.Role)} {u.Level} ур.", $"Unlock: {L.Money(cost)} · {L.Role(u.Role)} level {u.Level}") +
+            Theme.Draw(g, L.T($"Открыть: {L.Money(cost)} · {L.TracksText(u)} ур.", $"Unlock: {L.Money(cost)} · {L.TracksText(u)}") +
                           (goal.Price is int pr and > 0 ? L.T($" · потом цена {L.Money(pr)}", $" · then {L.Money(pr)} each") : ""),
                        hintF, Theme.Muted, new RectangleF(x, y, w, b.S(20)));
             y += b.S(30);
@@ -1181,7 +1203,11 @@ sealed class DatabaseForm : Form
                 }
                 else lines.Add((L.T("Срок покажу, когда наберётся 10 минут истории заработка.", "Time estimate appears after 10 minutes of earnings history."), Theme.Faint));
             }
-            lines.Add((L.T($"Ещё нужен уровень {u.Level} роли «{L.Role(u.Role)}».", $"Also needs {L.Role(u.Role)} level {u.Level}."), Theme.Faint));
+            var myLevels = settings?.EffectiveLevels() ?? L.Roles.ToDictionary(r => r, _ => 1);
+            var track = Builds.NearestTrack(u, myLevels);
+            if (Builds.Unlocked(u, myLevels)) lines.Add((L.T("Нужный уровень роли у тебя уже есть.", "You already have the role level it needs."), Theme.Faint));
+            else lines.Add((L.T($"Ещё нужен уровень {track.Level} роли «{L.Role(track.Role)}».", $"Also needs {L.Role(track.Role)} level {track.Level}."), Theme.Faint));
+            if (u.Note is { } note) lines.Add((L.T(note.Ru, note.En), Theme.Faint));
             foreach (var (text, color) in lines)
             {
                 Theme.Draw(g, text, hintF, color, new RectangleF(x, y, w, b.S(20)));
@@ -1278,6 +1304,8 @@ sealed class DatabaseForm : Form
         Group(L.T("Шлем цели", "Target helmet"), segHelmet);
         Group(L.T("Дистанция", "Distance"), segDist);
         Group(L.T("Куда попадаешь", "Hit zone"), segZone);
+        var limited = new Toggle { Size = new Size(Sc(44), Sc(26)), Checked = settings?.LimitedMode ?? false, Margin = new Padding(0, Sc(10), Sc(18), 0) };
+        Group(L.T("Режим Limited", "Limited mode"), limited);
 
         // Три карточки патронов + совет.
         var cards = new PaintBox { Dock = DockStyle.Top, Height = Sc(200) };
@@ -1294,19 +1322,25 @@ sealed class DatabaseForm : Form
 
         void Recalc()
         {
+            bool lim = limited.Checked;
+            // В Limited броню и шлемы 3–4-го уровня не продают — у противника их не будет.
+            if (lim && segBody.SelectedIndex > Season3.LimitedMaxArmour) segBody.SelectedIndex = Season3.LimitedMaxArmour;
+            if (lim && segHelmet.SelectedIndex > Season3.LimitedMaxArmour) segHelmet.SelectedIndex = Season3.LimitedMaxArmour;
             int body = segBody.SelectedIndex, helmet = segHelmet.SelectedIndex;
             double dist = dists[Math.Max(0, segDist.SelectedIndex)];
             string zone = zones[Math.Max(0, segZone.SelectedIndex)].Item1;
             pick.Text = L.Name(weapon) + "  ▾";
             pick.Width = pick.PreferredWidth(DeviceDpi);
-            results = AllLoads.Select(l => (l, Combat.Shots(data, weapon, zone, l, body, helmet, dist), Combat.MagazineCost(data, weapon, l), Combat.AmmoItem(data, weapon, l))).ToList();
-            advice.Text = Advice(results, body, zone, helmet);
+            results = AllLoads.Select(l => (l, lim && !Season3.LimitedAllows(l) ? null : Combat.Shots(data, weapon, zone, l, body, helmet, dist),
+                                            Combat.MagazineCost(data, weapon, l), Combat.AmmoItem(data, weapon, l))).ToList();
+            advice.Text = Advice(results, body, zone, helmet, lim);
+            if (Season3.PendingNote(data, weapon) is { } pending) advice.Text = (advice.Text + " " + pending).Trim();
             cards.Invalidate();
 
             grid.Rows.Clear();
             foreach (var z in Combat.Zones)
             {
-                var kills = AllLoads.Select(l => Combat.Shots(data, weapon, z, l, body, helmet, dist)).ToArray();
+                var kills = AllLoads.Select(l => lim && !Season3.LimitedAllows(l) ? null : Combat.Shots(data, weapon, z, l, body, helmet, dist)).ToArray();
                 double best = kills.Where(k => k != null).Select(k => k!.Seconds).DefaultIfEmpty(double.MaxValue).Min();
                 var zn = L.Zone(z);
                 var row = new List<object?> { char.ToUpper(zn[0]) + zn[1..] };
@@ -1343,7 +1377,8 @@ sealed class DatabaseForm : Form
                 y += b.S(30);
                 if (kill == null)
                 {
-                    Theme.Draw(g, L.T("нет у этой пушки", "not available"), smallF, Theme.Faint, new RectangleF(x, y + b.S(10), cw, b.S(20)));
+                    Theme.Draw(g, limited.Checked && !Season3.LimitedAllows(load) ? L.T("не продают в режиме Limited", "not sold in Limited mode") : L.T("нет у этой пушки", "not available"),
+                               smallF, Theme.Faint, new RectangleF(x, y + b.S(10), cw, b.S(20)));
                     continue;
                 }
                 var shots = $"{kill.Shots}";
@@ -1369,6 +1404,11 @@ sealed class DatabaseForm : Form
             m.Show(pick, new Point(0, pick.Height + Sc(4)));
         };
         foreach (var s in new[] { segBody, segHelmet, segDist, segZone }) s.SelectedIndexChanged += (_, _) => Recalc();
+        limited.CheckedChanged += (_, _) =>
+        {
+            if (settings != null) { settings.LimitedMode = limited.Checked; settings.NotifyChanged(); }
+            Recalc();
+        };
 
         page.Controls.Add(grid);
         page.Controls.Add(Gap(12));
@@ -1385,7 +1425,7 @@ sealed class DatabaseForm : Form
     }
 
     /// <summary>Совет по патронам: что быстрее убивает и стоит ли переплачивать.</summary>
-    static string Advice(List<(RoundLoad Load, Kill? Kill, int? Mag, DbItem? Item)> res, int body, string zone, int helmet)
+    static string Advice(List<(RoundLoad Load, Kill? Kill, int? Mag, DbItem? Item)> res, int body, string zone, int helmet, bool limited = false)
     {
         var ok = res.Where(r => r.Kill != null).ToList();
         if (ok.Count == 0) return "";
@@ -1394,6 +1434,9 @@ sealed class DatabaseForm : Form
         bool armoured = best.Kill!.Armoured;
         string target = armoured ? (zone is "head" or "neck" ? L.T($"шлема {helmet} ур.", $"a level {helmet} helmet") : L.T($"брони {body} ур.", $"level {body} armour"))
                                  : L.T("незащищённой зоны", "an unprotected zone");
+        if (ok.Count == 1 && limited)
+            return L.T($"В режиме Limited продают только обычные патроны: {best.Kill.Shots} выстр. за {Combat.Seconds(best.Kill.Seconds)}.",
+                       $"Limited mode sells standard rounds only: {best.Kill.Shots} shots in {Combat.Seconds(best.Kill.Seconds)}.");
         if (ok.Count == 1) return L.T($"У этой пушки только обычные патроны: {best.Kill.Shots} выстр. за {Combat.Seconds(best.Kill.Seconds)}.",
                                       $"This weapon only has standard rounds: {best.Kill.Shots} shots in {Combat.Seconds(best.Kill.Seconds)}.");
         // Тот же результат дешевле — так и советуем.
@@ -1544,6 +1587,7 @@ sealed class DatabaseForm : Form
         var sub = data.Patch.Count == 0
             ? L.T("Журнал патчей ещё не скачан — «Обновить базу» в главном окне", "Patch log not downloaded yet — «Update data» in the main window")
             : $"{data.PatchTitle} · {data.PatchDate}" + (data.PatchBuild.Length > 0 ? $" · {data.PatchBuild}" : "") +
+              (data.FromPatchNotes ? L.T(" · по официальным заметкам, MetaForge ещё не обновился", " · from the official patch notes, MetaForge not updated yet") : "") +
               (data.Patch.Any(p => p.Removed) ? L.T($" · удалено: {data.Patch.Count(p => p.Removed)}", $" · removed: {data.Patch.Count(p => p.Removed)}") : "") +
               " · " + L.T("зелёным — выгоднее для тебя, красным — хуже", "green — better for you, red — worse");
         page.Controls.Add(Header(L.T("Патч", "Patch"), sub, search, counters));

@@ -175,10 +175,16 @@ static class Builds
         public double Score { get; set; }
     }
 
-    /// <summary>Открыт ли предмет при таких уровнях ролей (null — уровни не учитываем).</summary>
+    /// <summary>Открыт ли предмет при таких уровнях ролей (null — уровни не учитываем). Хватает любой из веток открытия.</summary>
     public static bool Unlocked(Unlock? u, Dictionary<string, int>? levels) =>
-        levels == null || u == null || u.Level <= 0 || u.Role == null || u.Role == "None"
-        || (levels.TryGetValue(u.Role, out var lvl) && lvl >= u.Level);
+        levels == null || u == null || u.Tracks.Any(t => TrackOpen(t, levels));
+
+    static bool TrackOpen(Unlock t, Dictionary<string, int> levels) =>
+        t.Level <= 0 || t.Role == null || t.Role == "None" || (levels.TryGetValue(t.Role, out var lvl) && lvl >= t.Level);
+
+    /// <summary>Ветка, в которой до открытия меньше всего уровней (при равенстве — основная).</summary>
+    public static Unlock NearestTrack(Unlock u, Dictionary<string, int> levels) =>
+        u.Tracks.OrderBy(t => t.Role is null or "None" ? 0 : Math.Max(0, t.Level - levels.GetValueOrDefault(t.Role, 1))).First();
 
     static bool InBand(Attachment s, SightBand band)
     {

@@ -29,10 +29,14 @@ sealed class OverlayModel
     public string? Life { get; set; }
     public bool LifeWarn { get; set; }
 
-    /// <summary>Короткая оценка для плашки: грудь и голова против брони и шлема одного уровня, лучший патрон.</summary>
-    public static (string Where, string What)? KillLine(GameData data, Weapon w, int armour, int distance)
+    /// <summary>
+    /// Короткая оценка для плашки: грудь и голова против брони и шлема одного уровня, лучший патрон.
+    /// В режиме Limited — только обычные патроны и броня не выше 2-го уровня (другой там не продают).
+    /// </summary>
+    public static (string Where, string What)? KillLine(GameData data, Weapon w, int armour, int distance, bool limited = false)
     {
-        var loads = new[] { RoundLoad.FMJ, RoundLoad.HollowPoint, RoundLoad.ArmorPiercing };
+        armour = Season3.LimitArmour(armour, limited);
+        var loads = new[] { RoundLoad.FMJ, RoundLoad.HollowPoint, RoundLoad.ArmorPiercing }.Where(l => !limited || Season3.LimitedAllows(l)).ToArray();
         var chest = loads.Select(l => (l, k: Combat.Shots(data, w, "torso_upper", l, armour, armour, distance))).Where(t => t.k != null).ToList();
         if (chest.Count == 0) return null;
         var best = chest.OrderBy(t => t.k!.Seconds).ThenBy(t => Combat.MagazineCost(data, w, t.l) ?? int.MaxValue).First();
@@ -41,7 +45,8 @@ sealed class OverlayModel
         if (fmj.k != null && fmj.k.Shots == best.k!.Shots) best = fmj;
         var head = Combat.Shots(data, w, "head", best.l, armour, armour, distance);
         string name = best.l switch { RoundLoad.HollowPoint => "HP", RoundLoad.ArmorPiercing => "AP", _ => "FMJ" };
-        var where = (armour == 0 ? L.T("без брони", "no armour") : L.T($"броня {armour}", $"armour {armour}")) + L.T($", {distance} м", $", {distance} m");
+        var where = (armour == 0 ? L.T("без брони", "no armour") : L.T($"броня {armour}", $"armour {armour}")) + L.T($", {distance} м", $", {distance} m") +
+                    (limited ? ", Limited" : "");
         var s = L.T($"грудь {best.k!.Shots} · {Combat.Seconds(best.k.Seconds)}", $"chest {best.k!.Shots} · {Combat.Seconds(best.k.Seconds)}");
         if (head != null) s += L.T($" · голова {head.Shots}", $" · head {head.Shots}");
         if (chest.Count > 1) s += " · " + name;
@@ -92,8 +97,8 @@ sealed class OverlayModel
         int? lifeCost = null;
         if (data != null && s != null)
         {
-            if (s.ShowKill) kill = KillLine(data, w, s.TargetArmour, s.TargetDistance);
-            if (s.ShowLifeCost) lifeCost = LifeCostOf(data, w, atts, s.MyArmour);
+            if (s.ShowKill) kill = KillLine(data, w, s.TargetArmour, s.TargetDistance, s.LimitedMode);
+            if (s.ShowLifeCost) lifeCost = LifeCostOf(data, w, atts, Season3.LimitArmour(s.MyArmour, s.LimitedMode));
         }
 
         return new OverlayModel

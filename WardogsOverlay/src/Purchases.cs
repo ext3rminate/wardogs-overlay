@@ -5,14 +5,19 @@ namespace WardogsOverlay;
 /// столько (цена, открытие, открытие с покупкой, несколько пачек патронов или гранат), и из подходящих
 /// берём тот предмет, чьё название сейчас на экране (продавец показывает выбранный предмет крупно).
 /// Не получилось однозначно — показываем пару вариантов, а не «что-то купил».
+/// С Сезона 3 у продавца бывают скидки (догоняющая для низких уровней и для отстающей фракции) — тогда точной
+/// цены нет, и предмет принимаем, только если его название или картинка над ценником на экране.
 /// </summary>
 static class PurchaseMatcher
 {
     sealed record Option(string What, int Cost, string Kind, string NameRu, string NameEn, int Priority);
 
+    /// <summary>Самая большая скидка продавца, которую ещё считаем правдоподобной.</summary>
+    const double MaxDiscount = 0.5;
+
     public static (string What, string Kind) Attribute(GameData? data, int spent, Weapon? w, List<Attachment> now,
                                                        string? prevWeapon, List<Attachment> prevAtts, IReadOnlyList<string> screen,
-                                                       Func<List<DbItem>, DbItem?>? byIcon = null)
+                                                       Func<List<DbItem>, DbItem?>? byIcon = null, bool limited = false)
     {
         string open = L.T("открытие: ", "unlock: ");
         var options = new List<Option>();
@@ -36,14 +41,31 @@ static class PurchaseMatcher
         {
             // Патроны к текущей пушке — частая мелкая покупка.
             if (w != null)
-                foreach (var am in data.Items.Where(i => i.Tab == "ammunition" && i.CalibreKey == w.CalibreKey && i.Price > 0 && i.InVendor))
+                foreach (var am in data.Items.Where(i => i.Tab == "ammunition" && i.CalibreKey == w.CalibreKey && i.Price > 0 && i.InVendor && !(limited && Season3.LimitedExcludes(i))))
                     Add(L.Name(am), am.Name, am.Price!.Value, null, "other", 2, maxPacks: 10, unit: L.T(" пачки", " packs"));
             // Весь каталог продавца — по одной штуке (иначе пачки разных патронов дают десятки совпадений).
-            foreach (var it in data.Items.Where(i => i.InVendor || i.Unlock is { Cash: > 0 }))
+            // В режиме Limited часть каталога не продаётся (HP/AP, броня 3–4, ударная техника…) — не предлагаем её.
+            foreach (var it in data.Items.Where(i => (i.InVendor || i.Unlock is { Cash: > 0 }) && !(limited && Season3.LimitedExcludes(i))))
             {
                 string kind = it.Tab switch { "weapons" => "weapon", "attachments" => "attachments", _ => "other" };
                 Add(L.Name(it), it.Name, it.Price ?? 0, it.Unlock, kind, 1);
             }
+        }
+
+        // Скидка продавца: дешевле каталожной цены (не больше чем вдвое), и это подтверждает экран —
+        // название предмета или (если разрешено) картинка над ценником на потраченную сумму.
+        (string What, string Kind)? Discounted(bool icon)
+        {
+            var named = options.Where(o => o.Kind != "unlock" && o.Cost > spent && spent >= o.Cost * (1 - MaxDiscount))
+                               .Select(o => (o, s: ScreenScore(o, screen))).Where(t => t.s >= 0.8)
+                               .OrderByDescending(t => t.s).ThenByDescending(t => t.o.Priority).ThenBy(t => t.o.Cost - spent).ToList();
+            if (named.Count > 0) return (WithDiscount(named[0].o.What, named[0].o.Cost, spent), named[0].o.Kind);
+            if (!icon || byIcon == null || data == null) return null;
+            var cands = data.Items.Where(i => i.Price > spent && spent >= i.Price * (1 - MaxDiscount) && i.Icon.Length > 0 && i.InVendor
+                                              && !(limited && Season3.LimitedExcludes(i))).ToList();
+            return cands.Count > 0 && byIcon(cands) is { } item
+                ? (WithDiscount(L.Name(item), item.Price!.Value, spent), item.Tab switch { "weapons" => "weapon", "attachments" => "attachments", _ => "other" })
+                : null;
         }
 
         var hits = options.Where(o => o.Cost == spent).ToList();
@@ -54,6 +76,7 @@ static class PurchaseMatcher
             for (int i = 0; i < atts.Count; i++)
                 for (int j = i + 1; j < atts.Count; j++)
                     if (atts[i].Cost + atts[j].Cost == spent) return ($"{atts[i].What}, {atts[j].What}", "attachments");
+            if (Discounted(icon: true) is { } d) return d;
             var added = w != null && prevWeapon == w.Slug ? now.Where(a => prevAtts.All(x => x.Slug != a.Slug)).Select(L.Name).ToList() : [];
             return added.Count > 0 ? (string.Join(", ", added), "attachments")
                                    : (L.T("не нашёл в каталоге ничего ровно за эту сумму", "nothing in the catalogue costs exactly this"), "other");
@@ -62,11 +85,13 @@ static class PurchaseMatcher
         // Название подходящего предмета на экране — это он.
         var onScreen = hits.Select(o => (o, s: ScreenScore(o, screen))).Where(t => t.s >= 0.8).OrderByDescending(t => t.s).ThenByDescending(t => t.o.Priority).ToList();
         if (onScreen.Count > 0) return (onScreen[0].o.What, onScreen[0].o.Kind);
+        // Со скидкой сумма часто совпадает с полной ценой чего-то другого — название на экране важнее такого совпадения.
+        if (Discounted(icon: false) is { } byName) return byName;
 
         // Ценник ровно на эту сумму виден на экране — сравниваем картинку над ним с иконками кандидатов.
         if (byIcon != null && data != null)
         {
-            var cands = data.Items.Where(i => i.Price == spent && i.Icon.Length > 0 && i.InVendor).ToList();
+            var cands = data.Items.Where(i => i.Price == spent && i.Icon.Length > 0 && i.InVendor && !(limited && Season3.LimitedExcludes(i))).ToList();
             if (cands.Count > 0 && byIcon(cands) is { } item)
                 return (L.Name(item), item.Tab switch { "weapons" => "weapon", "attachments" => "attachments", _ => "other" });
         }
@@ -79,6 +104,13 @@ static class PurchaseMatcher
         string kindAll = best.Select(o => o.Kind).Distinct().Count() == 1 ? best[0].Kind : "other";
         var shown = best.Take(3).Select(o => o.What).ToList();
         return (L.T("одно из: ", "one of: ") + string.Join(" · ", shown) + (best.Count > 3 ? L.T($" и ещё {best.Count - 3}", $" and {best.Count - 3} more") : ""), kindAll);
+    }
+
+    /// <summary>«Бронежилет 2-го уровня (скидка 20%)».</summary>
+    static string WithDiscount(string what, int price, int spent)
+    {
+        int pct = (int)Math.Round(100.0 * (price - spent) / price);
+        return pct > 0 ? what + L.T($" (скидка {pct}%)", $" ({pct}% off)") : what;
     }
 
     /// <summary>Насколько название предмета похоже на строку с экрана (строки и пары соседних строк).</summary>

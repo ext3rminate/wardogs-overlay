@@ -21,7 +21,7 @@ sealed class MainForm : Form
     // Элементы пересоздаются при смене языка и DPI.
     Panel scroll = null!;
     Segmented segLang = null!, segPrio = null!, segTarget = null!, segDist = null!, segMine = null!;
-    Toggle tKill = null!, tLife = null!;
+    Toggle tKill = null!, tLife = null!, tLimited = null!;
     static readonly int[] KillDistances = [10, 50, 100, 200, 300];
     Toggle tSearch = null!, tOptions = null!, tCompact = null!, tMoney = null!, tHide = null!, tTray = null!, tAuto = null!;
     Label lblUpdVal = null!, lblKeysWarn = null!;
@@ -317,6 +317,9 @@ sealed class MainForm : Form
             v => settings.ShowLifeCost = v);
         segMine = SegRow(fight.Body, inner, L.T("Моя броня и шлем", "My armour and helmet"), [none, "1", "2", "3", "4"],
             i => settings.MyArmour = i);
+        tLimited = ToggleRow(fight.Body, inner, L.T("Режим Limited", "Limited mode"),
+            L.T("Нет HP и AP, броня и шлемы только до 2-го уровня", "No HP or AP ammo, armour and helmets up to level 2"),
+            v => settings.LimitedMode = v);
         col.Controls.Add(fight.Card);
 
         // --- карточка «Обновления»
@@ -554,6 +557,7 @@ sealed class MainForm : Form
         tAuto.Checked = settings.AutoUpdate;
         tKill.Checked = settings.ShowKill;
         tLife.Checked = settings.ShowLifeCost;
+        tLimited.Checked = settings.LimitedMode;
         segTarget.SelectedIndex = settings.TargetArmour;
         segMine.SelectedIndex = settings.MyArmour;
         segDist.SelectedIndex = Math.Max(0, Array.IndexOf(KillDistances, KillDistances.OrderBy(d => Math.Abs(d - settings.TargetDistance)).First()));
@@ -770,7 +774,10 @@ sealed class MainForm : Form
         card.Controls.Add(body);
         body.SizeChanged += (_, _) => card.Height = body.Height + card.Padding.Vertical;
         body.Controls.Add(Lbl(L.T($"Вышел патч: {d.PatchTitle}", $"New game patch: {d.PatchTitle}"), 16, 700, Theme.Good));
-        var info = Lbl($"{d.PatchDate} · {PatchSummary(d)} " + L.T("База уже обновлена — цифры на плашке актуальны.", "Data is already updated — panel numbers are current."), 13, 400, Theme.Muted);
+        var info = Lbl($"{d.PatchDate} · {PatchSummary(d)} " + (d.FromPatchNotes
+            ? L.T("MetaForge ещё не выложил данные патча — применил то, что разработчики назвали числами в заметках (цены, открытия, урон по торсу). Остальное обновится само.",
+                  "MetaForge hasn't published the patch data yet — applied what the developers stated as numbers in the patch notes (prices, unlocks, torso damage). The rest updates automatically.")
+            : L.T("База уже обновлена — цифры на плашке актуальны.", "Data is already updated — panel numbers are current.")), 13, 400, Theme.Muted);
         info.MaximumSize = new Size(inner - Sc(36), 0);
         info.Margin = new Padding(0, Sc(6), 0, Sc(10));
         body.Controls.Add(info);

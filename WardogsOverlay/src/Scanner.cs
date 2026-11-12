@@ -466,6 +466,7 @@ sealed class Scanner : IDisposable
         DbItem? ByIcon(List<DbItem> cands)
         {
             if (frameForPurchase == null) return null;
+            // Ценник ровно на потраченную сумму (при скидке — если игра показывает цену уже со скидкой).
             foreach (var tag in rec.PriceTags.Where(t => t.Value == spent))
             {
                 var (item, score, second) = recognizer.ItemAt(frameForPurchase, tag.Box, cands);
@@ -473,7 +474,7 @@ sealed class Scanner : IDisposable
             }
             return null;
         }
-        return PurchaseMatcher.Attribute(recognizer.Data, spent, rec.Weapon, now, vendorWeapon, vendorAtts, rec.ScreenLines, ByIcon);
+        return PurchaseMatcher.Attribute(recognizer.Data, spent, rec.Weapon, now, vendorWeapon, vendorAtts, rec.ScreenLines, ByIcon, settings.LimitedMode);
     }
 
     void SetForeground(bool fg)

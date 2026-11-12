@@ -4,8 +4,19 @@ namespace WardogsOverlay;
 
 sealed record Mod(string Attr, string Op, double Value);
 
-/// <summary>Когда предмет открывается: роль, её уровень и стоимость открытия.</summary>
-sealed record Unlock(string? Role, int Level, int Cash);
+/// <summary>
+/// Когда предмет открывается: роль, её уровень и стоимость открытия. С Сезона 3 часть предметов
+/// (броня, рюкзаки, разгрузки, парашюты, патроны, танки) открывается в нескольких ветках — остальные ветки в Also.
+/// </summary>
+sealed record Unlock(string? Role, int Level, int Cash)
+{
+    /// <summary>Другие ветки, в которых открывается тот же предмет.</summary>
+    public Unlock[] Also { get; init; } = [];
+    /// <summary>Пометка для показа: открытие поменялось, а точных уровней в данных ещё нет.</summary>
+    public (string Ru, string En)? Note { get; init; }
+    /// <summary>Все ветки открытия: основная и остальные.</summary>
+    public IEnumerable<Unlock> Tracks => Also.Length == 0 ? [this] : Also.Prepend(this);
+}
 
 sealed class Weapon
 {
@@ -34,9 +45,9 @@ sealed class Weapon
     public double? Climb10 { get; set; }
     /// <summary>Увод вбок за первые 10 выстрелов, градусы.</summary>
     public double? Drift10 { get; set; }
-    public int Price { get; init; }
-    public Unlock? Unlock { get; init; }
-    public bool InVendor { get; init; }
+    public int Price { get; set; }
+    public Unlock? Unlock { get; set; }
+    public bool InVendor { get; set; }
     public string Key { get; init; } = "";
     /// <summary>Как название выглядит в русской версии игры, для сравнения с OCR («СВД», «АК74»).</summary>
     public string KeyRu { get; init; } = "";
@@ -82,10 +93,10 @@ sealed class DbItem
     public required string Name { get; init; }
     public required string Tab { get; init; }
     public string Sub { get; init; } = "";
-    public int? Price { get; init; }
-    public Unlock? Unlock { get; init; }
-    public double? Weight { get; init; }
-    public bool InVendor { get; init; }
+    public int? Price { get; set; }
+    public Unlock? Unlock { get; set; }
+    public double? Weight { get; set; }
+    public bool InVendor { get; set; }
     public string Description { get; init; } = "";
     public string? Calibre { get; init; }
     /// <summary>Ключ калибра («545mm»), в отличие от подписи («5.45x39mm»).</summary>
@@ -150,15 +161,22 @@ sealed class GameData
     public List<DbItem> Items { get; } = [];
     public Dictionary<string, ArmourInfo> Armour { get; } = [];
     public List<PatchItem> Patch { get; } = [];
-    public string PatchTitle { get; private set; } = "";
-    public string PatchDate { get; private set; } = "";
+    public string PatchTitle { get; set; } = "";
+    public string PatchDate { get; set; } = "";
     /// <summary>Сборка игры, с которой снята база (CL-516586) — по ней видно, что вышел новый патч.</summary>
-    public string PatchBuild { get; private set; } = "";
-    public string PatchPreviousDate { get; private set; } = "";
+    public string PatchBuild { get; set; } = "";
+    public string PatchPreviousDate { get; set; } = "";
+    /// <summary>
+    /// База MetaForge ещё от прошлого патча, и поверх неё применены изменения из официальных заметок
+    /// разработчиков (Season3.Apply). Пропадает сам, когда MetaForge выложит данные нового патча.
+    /// </summary>
+    public bool FromPatchNotes { get; set; }
     /// <summary>Официальные записи разработчиков в Steam, новые сверху.</summary>
     public List<NewsPost> News { get; } = [];
     /// <summary>Калибры из баллистики MetaForge по ключу («545mm»).</summary>
     public Dictionary<string, CalibreInfo> Calibres { get; } = [];
+    /// <summary>Множители урона по зонам для каждого класса оружия («Assault Rifle» → голова, грудь…). Общие с Weapon.Hit.</summary>
+    public Dictionary<string, Dictionary<string, double>> Hitboxes { get; } = [];
     public string Version { get; private set; } = "";
 
     public static bool IsDownloaded => Files.All(f => File.Exists(JsonPath(f)));
@@ -279,7 +297,10 @@ sealed class GameData
 
     public static GameData Load() => Load(staged: false);
 
-    static GameData Load(bool staged)
+    /// <summary>corrections: false — данные MetaForge как есть, без поправок из официальных заметок к патчу.</summary>
+    public static GameData Load(bool corrections) => Load(staged: false, corrections);
+
+    static GameData Load(bool staged, bool corrections = true)
     {
         var gd = new GameData();
         using var db = JsonDocument.Parse(File.ReadAllText(ReadPath("database", staged)));
@@ -399,6 +420,7 @@ sealed class GameData
         ReadBallistics(bal.RootElement, gd, weaponsBySlug);
         ReadChangelog(gd, staged);
         ReadNews(gd, staged);
+        if (corrections) Season3.Apply(gd);
         if (gd.Weapons.Count == 0 || gd.Attachments.Count == 0)
             throw new InvalidDataException(L.T("в базе нет пушек или обвесов", "data has no weapons or attachments"));
         return gd;
@@ -422,7 +444,7 @@ sealed class GameData
                     gd.Calibres[c.Name] = new CalibreInfo(d, Math.Max(1, (int)(Num(c.Value, "pellets") ?? 1)), pen, rules);
                 }
 
-        var hitboxes = new Dictionary<string, Dictionary<string, double>>();
+        var hitboxes = gd.Hitboxes;
         if (root.TryGetProperty("hitboxes", out var hb) && hb.ValueKind == JsonValueKind.Object)
             foreach (var cls in hb.EnumerateObject())
                 hitboxes[cls.Name] = cls.Value.EnumerateObject().Where(z => z.Value.ValueKind == JsonValueKind.Number)
@@ -541,10 +563,34 @@ sealed class GameData
         };
     }
 
-    static Unlock? ReadUnlock(JsonElement it)
+    /// <summary>
+    /// Открытие предмета. С Сезона 3 предмет может открываться в нескольких ветках, а в каком виде MetaForge
+    /// это выложит, заранее неизвестно — принимаем и объект, и список, и список веток внутри объекта
+    /// («tracks», «alternatives», «also», «roles»), и отдельный список «unlocks».
+    /// </summary>
+    internal static Unlock? ReadUnlock(JsonElement it)
     {
-        if (!it.TryGetProperty("unlock", out var u) || u.ValueKind != JsonValueKind.Object) return null;
-        return new Unlock(Str(u, "role"), (int)(Num(u, "level") ?? 0), (int)(Num(u, "cash") ?? 0));
+        var list = new List<Unlock>();
+        void One(JsonElement u)
+        {
+            if (u.ValueKind != JsonValueKind.Object) return;
+            if (Num(u, "level") is not null || Str(u, "role") is not null || Num(u, "cash") is not null)
+                list.Add(new Unlock(Str(u, "role") ?? Str(u, "track"), (int)(Num(u, "level") ?? 0), (int)(Num(u, "cash") ?? 0)));
+            foreach (var key in new[] { "tracks", "alternatives", "also", "roles" })
+                if (u.TryGetProperty(key, out var more) && more.ValueKind == JsonValueKind.Array)
+                    foreach (var m in more.EnumerateArray()) One(m);
+        }
+        foreach (var key in new[] { "unlock", "unlocks" })
+        {
+            if (!it.TryGetProperty(key, out var u)) continue;
+            if (u.ValueKind == JsonValueKind.Array) foreach (var x in u.EnumerateArray()) One(x);
+            else One(u);
+        }
+        if (list.Count == 0) return null;
+        // Основная — первая ветка с ролью (у неё цена открытия, которую знала программа до Сезона 3), одинаковые не дублируем.
+        var tracks = list.DistinctBy(t => (t.Role, t.Level)).ToList();
+        var main = tracks.FirstOrDefault(t => t.Role is not (null or "None") && t.Level > 0) ?? tracks[0];
+        return main with { Also = tracks.Where(t => t != main && t.Role is not (null or "None") && t.Level > 0).ToArray() };
     }
 
     static void ReadMods(JsonElement el, List<Mod> into)
